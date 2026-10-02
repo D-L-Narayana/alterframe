@@ -36,12 +36,11 @@ export function hexToRgb(hex: string): [number, number, number] {
 
 const SOBEL = glsl`
 // Luminance used for edge detection: the display-space video (see header comment), pre-blurred
-// with a symmetric 3×3 tent (four linear-filtered taps at the texel corners) so sensor/codec noise
-// is halved before the Sobel while the blur stays centred (no half-texel line shift).
+// with two linear-filtered taps at opposite texel corners (a centred 2×2+2×2 box, 8 texels for
+// 2 fetches) so sensor/codec noise is reduced before the Sobel without shifting the line.
 float edgeLuma(vec2 uv) {
   vec2 h = 0.5 * u_texel;
-  return 0.25 * (luma(texture(u_video, uv + vec2( h.x,  h.y)).rgb) + luma(texture(u_video, uv + vec2(-h.x,  h.y)).rgb)
-               + luma(texture(u_video, uv + vec2( h.x, -h.y)).rgb) + luma(texture(u_video, uv + vec2(-h.x, -h.y)).rgb));
+  return 0.5 * (luma(texture(u_video, uv + h).rgb) + luma(texture(u_video, uv - h).rgb));
 }
 
 // 3×3 Sobel magnitude of f sampled with tap spacing s (texels). Returns gradient length.

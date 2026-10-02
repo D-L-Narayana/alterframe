@@ -132,7 +132,9 @@ test.describe('hand window (mock tracking)', () => {
     const current = () => group.getByRole('radio', { checked: true }).textContent();
     const before = await current();
     const [tTogether, tOpen] = await holdSequence(page, [
-      { sample: POSES.together, ms: 200, opts: { handCount: 2 } },
+      // 120 ms scheduled: the pose is released on the next rendered frame, so under software
+      // rendering (≈250 ms frames) the measured hold still stays well below togetherArmMs (500).
+      { sample: POSES.together, ms: 120, opts: { handCount: 2 } },
       { sample: POSES.wide, ms: 0, opts: { handCount: 2 } },
     ]);
     const heldMs = tOpen! - tTogether!;
