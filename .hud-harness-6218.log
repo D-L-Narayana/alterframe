@@ -1,0 +1,18 @@
+
+  VITE v8.3.2  ready in 397 ms
+
+  ➜  Local:   http://127.0.0.1:6218/
+3:31:22 PM [vite] (client) page reload src/hud/layout.ts
+3:31:22 PM [vite] (client) page reload src/hud/layout.ts
+3:31:56 PM [vite] (client) page reload src/tracking/__harness__/index.html
+3:32:55 PM [vite] (client) page reload src/render/core/__harness__/gpu-test.html
+3:32:55 PM [vite] (client) page reload src/render/core/__harness__/gpu-test.html
+3:33:58 PM [vite] (client) page reload src/hud/draw.ts
+3:34:05 PM [vite] (client) page reload src/render/persona/__harness__/index.html
+3:35:38 PM [vite] (client) page reload src/media/__harness__/index.html
+3:35:39 PM [vite] (client) page reload src/media/__harness__/index.html
+3:37:03 PM [vite] (client) page reload index.html
+3:39:43 PM [vite] (client) page reload src/render/core/__harness__/index.html
+3:39:43 PM [vite] (client) page reload src/render/core/__harness__/index.html
+3:39:50 PM [vite] (client) page reload src/tracking/__harness__/index.html
+3:41:09 PM [vite] (client) page reload .w3-dist-check/index.html

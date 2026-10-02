@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="AlterFrame">
+  <title>AlterFrame</title>
+  <desc>Original mark: a window held between two L-shaped hands (index up, thumb inward).</desc>
+  <rect width="512" height="512" rx="112" fill="#0b0b0d"/>
+  <polygon points="124,132 388,152 300,352 212,332" fill="#ff4fb6"/>
+  <polygon points="152,160 356,176 288,324 232,308" fill="none" stroke="#3b7bff" stroke-width="10" stroke-linejoin="round" opacity="0.9"/>
+  <path d="M124 132 V332 H212" stroke="#f2f2f4" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M388 152 V352 H300" stroke="#f2f2f4" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

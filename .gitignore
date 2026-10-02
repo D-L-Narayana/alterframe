@@ -1,0 +1,15 @@
+node_modules
+dist
+coverage
+playwright-report
+test-results
+public/models/*.task
+public/models/*.tflite
+public/wasm
+tests/fixtures/*.y4m
+.vercel
+.DS_Store
+*.local
+.env
+.env.*
+.probe-*

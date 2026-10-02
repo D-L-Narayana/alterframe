@@ -1,0 +1,102 @@
+/* App shell layout (W1). Stage dominates; chrome is minimal dark glass. */
+
+.af-app { position: fixed; inset: 0; background: var(--af-bg); }
+
+/* ---------- Onboarding ---------- */
+.af-onboarding {
+  position: absolute; inset: 0; overflow: auto;
+  display: grid; place-items: center; padding: 24px;
+  background:
+    radial-gradient(60% 50% at 20% 10%, rgba(255,79,182,.14), transparent 60%),
+    radial-gradient(50% 40% at 85% 90%, rgba(59,123,255,.16), transparent 60%),
+    var(--af-bg);
+}
+.af-onboarding__card {
+  width: min(100%, 560px);
+  background: var(--af-surface); border: 1px solid var(--af-hairline-strong);
+  border-radius: 16px; box-shadow: var(--af-shadow); padding: 28px 28px 24px;
+}
+.af-onboarding__brand { display: flex; align-items: center; gap: 10px; color: var(--af-muted); font-size: var(--af-fs-sm); letter-spacing: .12em; text-transform: uppercase; }
+.af-onboarding__brand svg { color: var(--af-accent); }
+.af-onboarding h1 { margin: 14px 0 8px; font-size: clamp(1.5rem, 3.4vw, 2rem); line-height: 1.15; letter-spacing: -0.02em; font-weight: 600; }
+.af-onboarding p { margin: 0 0 12px; color: var(--af-muted); }
+.af-onboarding__how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 18px 0 20px; padding: 0; list-style: none; }
+.af-onboarding__step {
+  padding: 12px; border-radius: var(--af-radius); background: rgba(255,255,255,.03); border: 1px solid var(--af-hairline);
+  font-size: var(--af-fs-sm); color: var(--af-text);
+}
+.af-onboarding__step b { display: block; color: var(--af-accent); font-size: var(--af-fs-xs); letter-spacing: .08em; margin-bottom: 4px; }
+.af-onboarding__privacy { display: flex; gap: 8px; align-items: flex-start; font-size: var(--af-fs-sm); color: var(--af-text); padding: 10px 12px; border-radius: var(--af-radius); background: rgba(59,123,255,.08); border: 1px solid rgba(59,123,255,.25); margin: 0 0 18px; }
+.af-onboarding__actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.af-onboarding__device { margin-top: 14px; }
+.af-onboarding__hint { margin-top: 14px; font-size: var(--af-fs-xs); color: var(--af-muted); }
+@media (max-width: 520px) {
+  .af-onboarding__how { grid-template-columns: 1fr; }
+  .af-onboarding__card { padding: 22px 18px 18px; }
+}
+
+/* ---------- Stage ---------- */
+.af-stage { position: absolute; inset: 0; background: #000; }
+.af-stage__canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; touch-action: none; }
+.af-stage__loader {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 5; pointer-events: none;
+}
+.af-stage__loader-bar { height: 3px; background: linear-gradient(90deg, transparent, var(--af-accent), var(--af-accent-2), transparent); background-size: 50% 100%; animation: af-indeterminate 1.2s linear infinite; }
+.af-stage__loader-text {
+  display: inline-block; margin: 10px; padding: 6px 10px; border-radius: var(--af-radius-pill);
+  background: var(--af-glass); border: 1px solid var(--af-hairline); backdrop-filter: blur(12px);
+  font-size: var(--af-fs-xs); color: var(--af-muted);
+}
+@keyframes af-indeterminate { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+
+/* ---------- Controls bar ---------- */
+.af-controls {
+  position: absolute; left: 50%; bottom: max(12px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+  z-index: 10; height: var(--af-bar-h); max-width: calc(100vw - 24px);
+  display: flex; align-items: center; gap: 6px; padding: 0 8px;
+  background: var(--af-glass); border: 1px solid var(--af-hairline-strong);
+  border-radius: 14px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--af-shadow);
+}
+.af-controls__group { display: flex; align-items: center; gap: 4px; }
+.af-controls__sep { width: 1px; height: 28px; background: var(--af-hairline-strong); margin: 0 4px; }
+.af-controls__rec { display: inline-flex; align-items: center; gap: 6px; font-family: var(--af-font-mono); font-size: var(--af-fs-sm); color: var(--af-danger); min-width: 64px; font-variant-numeric: tabular-nums; }
+.af-controls__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--af-danger); animation: af-blink 1s steps(1) infinite; }
+@keyframes af-blink { 50% { opacity: .25; } }
+.af-badge {
+  display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; border-radius: var(--af-radius-pill);
+  background: rgba(255,255,255,.06); border: 1px solid var(--af-hairline); font-family: var(--af-font-mono); font-size: var(--af-fs-xs); color: var(--af-muted);
+  font-variant-numeric: tabular-nums;
+}
+.af-controls--compact .af-controls__desktop { display: none; }
+.af-controls__sheet-body > * + * { margin-top: 14px; }
+.af-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+/* ---------- Status toast ---------- */
+.af-toast-region { position: absolute; left: 50%; top: max(12px, env(safe-area-inset-top)); transform: translateX(-50%); z-index: 20; pointer-events: none; width: min(92vw, 420px); display: flex; justify-content: center; }
+.af-toast {
+  pointer-events: auto; display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px;
+  background: var(--af-glass); border: 1px solid var(--af-hairline-strong); border-radius: var(--af-radius);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: var(--af-shadow);
+  font-size: var(--af-fs-sm); animation: af-pop var(--af-dur) var(--af-ease);
+}
+.af-toast--error { border-color: rgba(255,59,48,.5); }
+
+/* ---------- Error panel ---------- */
+.af-error {
+  position: absolute; inset: 0; z-index: 15; display: grid; place-items: center; padding: 24px; background: rgba(11,11,13,.82);
+}
+.af-error__card {
+  width: min(100%, 440px); padding: 24px; background: var(--af-surface); border: 1px solid rgba(255,59,48,.45);
+  border-radius: 14px; box-shadow: var(--af-shadow);
+}
+.af-error__card h2 { margin: 0 0 8px; font-size: var(--af-fs-lg); }
+.af-error__card p { margin: 0 0 16px; color: var(--af-muted); }
+.af-error__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* ---------- Help ---------- */
+.af-help__table { width: 100%; border-collapse: collapse; }
+.af-help__table td { padding: 8px 0; border-bottom: 1px solid var(--af-hairline); vertical-align: top; }
+.af-help__table td:first-child { width: 120px; white-space: nowrap; }
+.af-help__table .af-kbd + .af-kbd { margin-left: 4px; }
+.af-help__gesture { margin: 0 0 14px; color: var(--af-muted); font-size: var(--af-fs-sm); }

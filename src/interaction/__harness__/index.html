@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>W7 harness — window quad / gesture / director</title>
+    <style>
+      body { margin: 0; background: #0b0b0d; color: #f2f2f4; font: 14px/1.4 system-ui, sans-serif; }
+      main { display: grid; grid-template-columns: 1fr 320px; gap: 12px; padding: 12px; }
+      canvas { width: 100%; aspect-ratio: 16 / 9; background: #141418; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; }
+      aside { display: grid; gap: 8px; align-content: start; }
+      label { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+      select, button { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.15); background: #1c1c22; color: inherit; }
+      pre { margin: 0; white-space: pre-wrap; font-size: 12px; color: #9a9aa3; max-height: 40vh; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <canvas id="c" width="1280" height="720" aria-label="W7 harness canvas"></canvas>
+      <aside>
+        <label>Scenario
+          <select id="scenario">
+            <option value="l-pose">L pose (drift)</option>
+            <option value="thumbs-up">Thumbs up</option>
+            <option value="crossed">Crossed (bow-tie)</option>
+            <option value="slit">Closed fists slit</option>
+            <option value="gesture">Together → open (persona cycle)</option>
+            <option value="lost">Hand lost (hold/fade)</option>
+          </select>
+        </label>
+        <label>Ordering
+          <select id="ordering"><option value="convex">convex</option><option value="faithful">faithful</option></select>
+        </label>
+        <label>Corner spring <input id="spring" type="checkbox" /></label>
+        <label>Gesture cycle <input id="gesture" type="checkbox" checked /></label>
+        <button id="director" type="button">Director: start</button>
+        <pre id="log"></pre>
+      </aside>
+    </main>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

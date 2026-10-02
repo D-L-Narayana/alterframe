@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pinned to major.minor so the version is deterministic. Must satisfy the INSTALLED engine
+  # ranges: vite 8 (^20.19.0 || >=22.12.0) and eslint 10 (^20.19.0 || ^22.13.0 || >=24).
+  # tests/unit/infra/ci.test.ts fails if this drifts out of range. A bare "20" would resolve to
+  # 20.x releases that Vite 8 rejects on some runners, so it is not used.
+  NODE_VERSION: '22.23'
+  CI: 'true'
+
+jobs:
+  check:
+    name: typecheck · lint · unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install (runs postinstall → copy MediaPipe wasm into public/wasm)
+        run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - name: Unit tests (incl. repo hygiene)
+        run: npm test -- --reporter=default --reporter=junit --outputFile=test-results/unit-junit.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-results
+          path: test-results/unit-junit.xml
+          if-no-files-found: ignore
+
+  build:
+    name: build · verify dist payload
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Cache MediaPipe models (fetched by prebuild, not committed)
+        uses: actions/cache@v4
+        with:
+          path: public/models/*.task public/models/*.tflite
+          key: mediapipe-models-${{ hashFiles('scripts/fetch-models.mjs') }}
+      - run: npm ci
+      - name: Build (prebuild fetches models + copies wasm; postbuild verifies dist/models + dist/wasm)
+        run: npm run build
+      - name: Bundle size report
+        run: node scripts/bundle-report.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 7
+
+  e2e:
+    name: playwright (chromium, fake camera, mock tracking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [check]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - uses: actions/cache@v4
+        with:
+          path: public/models/*.task public/models/*.tflite
+          key: mediapipe-models-${{ hashFiles('scripts/fetch-models.mjs') }}
+      - run: npm ci
+      - run: npm run fetch-models
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Generate synthetic fixture video (gitignored, ~125 MB)
+        run: npm run fixture
+      - name: Run e2e
+        run: npx playwright test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7

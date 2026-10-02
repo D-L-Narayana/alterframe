@@ -1,0 +1,26 @@
+
+  VITE v8.3.2  ready in 581 ms
+
+  ➜  Local:   http://localhost:6213/
+  ➜  Network: use --host to expose
+3:33:56 PM [vite] (client) Failed to load source map for /home/user/workspace/reel-recreation/app/node_modules/@mediapipe/tasks-vision/vision_bundle.mjs.
+Error: An error occurred while trying to read the map file at vision_bundle_mjs.js.map
+Error: ENOENT: no such file or directory, open '/home/user/workspace/reel-recreation/app/node_modules/@mediapipe/tasks-vision/vision_bundle_mjs.js.map'
+    at Object.readFileSync (node:fs:448:20)
+    at file:///home/user/workspace/reel-recreation/app/node_modules/vite/dist/node/chunks/node.js:17495:13
+    at readFromFileMap (file:///home/user/workspace/reel-recreation/app/node_modules/vite/dist/node/chunks/node.js:17193:13)
+    at exports.fromMapFileComment (file:///home/user/workspace/reel-recreation/app/node_modules/vite/dist/node/chunks/node.js:17288:12)
+    at exports.fromMapFileSource (file:///home/user/workspace/reel-recreation/app/node_modules/vite/dist/node/chunks/node.js:17299:22)
+    at extractSourcemapFromFile (file:///home/user/workspace/reel-recreation/app/node_modules/vite/dist/node/chunks/node.js:17481:87)
+    at loadAndTransform (file:///home/user/workspace/reel-recreation/app/node_modules/vite/dist/node/chunks/node.js:19954:22)
+3:34:05 PM [vite] (client) page reload src/render/persona/__harness__/index.html
+3:35:38 PM [vite] (client) page reload src/media/__harness__/index.html
+3:35:39 PM [vite] (client) page reload src/media/__harness__/index.html
+3:36:31 PM [vite] (client) page reload src/tracking/mask.ts
+3:37:03 PM [vite] (client) page reload index.html
+3:39:43 PM [vite] (client) page reload src/render/core/__harness__/index.html
+3:39:43 PM [vite] (client) page reload src/render/core/__harness__/index.html
+3:39:50 PM [vite] (client) page reload src/tracking/__harness__/main.tsx
+3:39:50 PM [vite] (client) page reload src/tracking/__harness__/main.tsx
+3:39:50 PM [vite] (client) page reload src/tracking/__harness__/index.html
+3:41:09 PM [vite] (client) page reload .w3-dist-check/index.html

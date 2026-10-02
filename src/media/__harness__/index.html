@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>W2 harness — media sources & runtime</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; background: #0b0b0d; color: #f2f2f4; font: 14px/1.4 Inter, system-ui, sans-serif; }
+      header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.08); }
+      button, select, label { min-height: 36px; border-radius: 8px; border: 1px solid rgba(255,255,255,.14); background: #141418; color: inherit; padding: 0 12px; }
+      button:focus-visible, select:focus-visible { outline: 2px solid #3b7bff; outline-offset: 2px; }
+      main { position: relative; height: calc(100vh - 110px); }
+      canvas#stage { width: 100%; height: 100%; display: block; object-fit: cover; background: #000; }
+      pre#stats { position: absolute; left: 8px; top: 8px; margin: 0; padding: 8px 10px; background: rgba(0,0,0,.55); border-radius: 8px; font: 12px/1.5 ui-monospace, monospace; }
+      #status { padding: 6px 12px; color: #9a9aa3; min-height: 20px; }
+      #status[data-level="error"] { color: #ff3b30; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <button id="cam">Use camera</button>
+      <select id="devices" aria-label="Camera"></select>
+      <button id="flip">Switch facing</button>
+      <label><input type="file" id="file" accept="video/*" hidden /> <button id="open">Open a video file</button></label>
+      <button id="mirror" aria-pressed="true">Mirror: on</button>
+      <button id="hud" aria-pressed="true">HUD: on</button>
+      <button id="director" aria-pressed="false">Director: off</button>
+      <button id="stop">Stop</button>
+    </header>
+    <main>
+      <canvas id="stage" aria-label="Harness stage"></canvas>
+      <pre id="stats" aria-live="off"></pre>
+    </main>
+    <div id="status" aria-live="polite"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,60 @@
+{
+  "name": "alterframe",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Hold a window between your hands and reveal your illustrated alter ego. Browser-only hand/face tracking (MediaPipe) + WebGL2 stylization.",
+  "license": "MIT",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "predev": "node scripts/fetch-models.mjs && node scripts/copy-wasm.mjs",
+    "qa": "vite --port 6220 --strictPort",
+    "fetch-models": "node scripts/fetch-models.mjs",
+    "copy-wasm": "node scripts/copy-wasm.mjs",
+    "postinstall": "node scripts/copy-wasm.mjs",
+    "prebuild": "node scripts/fetch-models.mjs && node scripts/copy-wasm.mjs",
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "postbuild": "node scripts/verify-dist.mjs",
+    "preview": "vite preview --port 4173",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:hygiene": "vitest run tests/unit/repo-hygiene.test.ts tests/unit/infra",
+    "fixture": "node tests/fixtures/make-fixture.mjs",
+    "pretest:e2e": "node tests/fixtures/make-fixture.mjs --if-missing",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:a11y": "playwright test tests/e2e/a11y.spec.ts",
+    "test:visual:update": "playwright test tests/e2e/visual.spec.ts --update-snapshots",
+    "check": "npm run typecheck && npm run lint && npm test",
+    "hygiene": "node scripts/hygiene.mjs"
+  },
+  "dependencies": {
+    "@fontsource/inter": "5.3.0",
+    "@mediapipe/tasks-vision": "1.0.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zustand": "5.0.15"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.1.1",
+    "eslint": "10.11.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
+    "typescript": "~5.9.0",
+    "typescript-eslint": "8.71.0",
+    "vite": "8.3.2",
+    "vitest": "4.1.11"
+  }
+}

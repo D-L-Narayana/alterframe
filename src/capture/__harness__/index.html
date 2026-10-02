@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>W9 capture harness — AlterFrame</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; background: #0b0b0d; color: #f2f2f4; font: 14px/1.4 Inter, system-ui, sans-serif; }
+      main { display: grid; grid-template-columns: 1fr 320px; gap: 16px; padding: 16px; }
+      canvas#stage { width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; }
+      aside { display: grid; gap: 10px; align-content: start; }
+      fieldset { border: 1px solid rgba(255,255,255,.08); border-radius: 10px; }
+      button, select { font: inherit; min-height: 44px; border-radius: 10px; border: 1px solid rgba(255,255,255,.12); background: #141418; color: inherit; padding: 0 14px; }
+      button:focus-visible, select:focus-visible { outline: 2px solid #3b7bff; outline-offset: 2px; }
+      button[data-recording="true"] { background: #ff3b30; color: #fff; }
+      pre { margin: 0; white-space: pre-wrap; font-size: 12px; color: #9a9aa3; }
+      a.dl { color: #ff4fb6; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <canvas id="stage" width="1280" height="720" aria-label="Synthetic spinning test scene"></canvas>
+      <aside>
+        <fieldset>
+          <legend>Capture</legend>
+          <div class="row">
+            <label>Aspect <select id="aspect" aria-label="Capture aspect">
+              <option value="source">source</option>
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="1:1">1:1</option>
+            </select></label>
+          </div>
+          <div class="row">
+            <button id="record" type="button">Record</button>
+            <button id="snapshot" type="button">Snapshot</button>
+          </div>
+          <pre id="status" aria-live="polite">idle</pre>
+          <div id="downloads" class="row"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Performance</legend>
+          <label class="row"><input id="load" type="checkbox" /> Simulate heavy frame (busy-wait 60 ms)</label>
+          <label class="row"><input id="adaptive" type="checkbox" checked /> Adaptive quality</label>
+          <pre id="perf"></pre>
+        </fieldset>
+      </aside>
+    </main>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
