@@ -1,7 +1,8 @@
 # Verification report (integration, 2026-10-02)
 
-What was verified, how, and what remains unverified. Numbers below are from the integrated tree on
-the final commit; re-run the commands to reproduce.
+What was verified, how, and what remains unverified. Each number is a snapshot of one specific run
+(CI run id or local run) on the stated commit; re-run the commands to reproduce. "Verified" below
+always means verified in that environment — none of it is a claim about real-camera hardware.
 
 ## Gates
 
@@ -12,8 +13,8 @@ the final commit; re-run the commands to reproduce.
 | Lint | `npm run lint` | 0 errors, 0 warnings |
 | Unit | `npm test` | 50 files, **606 tests passed** (incl. repo hygiene, infra, A1 latency) |
 | Build + dist gate | `npm run build` (prebuild fetches models, postbuild `verify-dist`) | JS 515.8 kB / **162.7 kB gzip** (budget 450 kB gz); models + wasm present in `dist/`; no inline scripts; 0 occurrences of `injectTracking` / `__alterframe` / `mockTracking` / `VITE_E2E` in the bundle |
-| E2E (Chromium + SwiftShader, fake camera from generated Y4M, injected tracking) | `npx playwright test` | **41 passed, 2 skipped** (production-gate needs a served build) |
-| Production gate against the built `dist` served with the `vercel.json` headers | `E2E_PROD_URL=… npx playwright test tests/e2e/production-gate.spec.ts` | 2 passed — no dev globals, no inline scripts |
+| E2E (Chromium + SwiftShader, fake camera from generated Y4M, injected tracking) | `npx playwright test` (42 tests) | CI run 37048554807 on `4a2d495`: **40 passed, 2 skipped** (the two production-gate specs need a served build). Local full runs on the integration sandbox: 40 passed / 2 skipped, except one run where `window.spec.ts › short together … does not cycle` failed its *environmental* precondition (software-rendered frames took ≥ 500 ms after a 5-minute run, so a pose cannot be "held short"); since `4a2d495` that precondition is an explicit `test.skip` with the measured hold in its message. The product threshold (no persona cycle under 500 ms) is unchanged and the test passed, not skipped, in CI. |
+| Production gate against the built `dist` served with the `vercel.json` headers, and against the live production URL | `E2E_PROD_URL=… npx playwright test tests/e2e/production-gate.spec.ts` | 2 passed in both cases — no dev globals, no inline scripts |
 | CSP smoke on the built bundle | private probe (headless Chromium, real MediaPipe on fake camera) | 0 CSP violations, 0 page errors, only same-origin requests, stage renders, comic/masked switch works |
 | Render core GPU pixel tests | `tests/e2e/render-pixels.spec.ts` | 6/6 at 1280×720, 390×844, 1024×1024 (quad inside/outside colours, opacity blend, mirror flips video only) |
 | Shader compile + look | `tests/e2e/shaders.spec.ts` + W5 `verify.mjs` | 12 passes compile; 38/38 pixel checks after the ink change |
