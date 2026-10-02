@@ -1,0 +1,10 @@
+node_modules
+dist
+public/models/*.task
+public/models/*.tflite
+public/wasm
+test-results
+playwright-report
+tests/e2e/__screenshots__
+docs/handoffs
+.probe-*

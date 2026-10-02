@@ -2,6 +2,8 @@
 
 **Hold a window between your hands and reveal your illustrated alter ego.**
 
+Live: https://alterframe-xi.vercel.app · Source: https://github.com/D-L-Narayana/alterframe · Verification: [docs/verification.md](docs/verification.md)
+
 AlterFrame is a browser app. Point your webcam at yourself, raise both hands in an "L" (index up,
 thumb inward), and the quadrilateral stretched between your fingertips becomes a window into a
 live, stylized version of the same scene: a paper-and-ink portrait, a masked hero in a neon city,
