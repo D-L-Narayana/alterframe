@@ -11,7 +11,8 @@ describe('manifest.webmanifest', () => {
   it('has required fields and dark theme colours from the design system', () => {
     expect(manifest.name).toBe('AlterFrame');
     expect(manifest.short_name.length).toBeLessThanOrEqual(12);
-    expect(manifest.start_url).toBe('/');
+    // Relative so the PWA also works when hosted under a sub-path (Vite base './').
+    expect(manifest.start_url).toBe('./');
     expect(['standalone', 'fullscreen', 'minimal-ui']).toContain(manifest.display);
     expect(manifest.background_color.toLowerCase()).toBe('#0b0b0d');
     expect(manifest.theme_color.toLowerCase()).toBe('#0b0b0d');
@@ -20,7 +21,7 @@ describe('manifest.webmanifest', () => {
   it('every icon exists, is SVG, declares sizes and includes a maskable one', () => {
     expect(manifest.icons.length).toBeGreaterThanOrEqual(2);
     for (const icon of manifest.icons) {
-      const p = join(APP_ROOT, 'public', icon.src.replace(/^\//, ''));
+      const p = join(APP_ROOT, 'public', icon.src.replace(/^\.?\//, ''));
       expect(existsSync(p), `${icon.src} exists`).toBe(true);
       expect(icon.type).toBe('image/svg+xml');
       expect(icon.sizes).toMatch(/^\d+x\d+( \d+x\d+)*$|^any$/);

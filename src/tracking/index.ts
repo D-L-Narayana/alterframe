@@ -83,9 +83,20 @@ export interface AlterFrameTracker extends Tracker {
 
 type Resolved = Required<Omit<AlterFrameTrackerOptions, 'smoothing'>> & { smoothing: OneEuroParams };
 
+/**
+ * Asset folders relative to the app's base URL, so the bundle works at the domain root (Vercel)
+ * and under a sub-path (Vite `base: './'`, private previews). Outside a document (unit tests)
+ * falls back to root-absolute paths.
+ */
+function defaultAssetUrl(folder: 'models' | 'wasm'): string {
+  const base = (import.meta.env?.BASE_URL as string | undefined) ?? '/';
+  if (typeof document === 'undefined') return `/${folder}`;
+  return new URL(`${base}${folder}`, document.baseURI).href;
+}
+
 const DEFAULTS: Resolved = {
-  modelBaseUrl: '/models',
-  wasmBaseUrl: '/wasm',
+  modelBaseUrl: defaultAssetUrl('models'),
+  wasmBaseUrl: defaultAssetUrl('wasm'),
   delegate: 'GPU',
   numHands: 2,
   enableFace: true,
