@@ -1,14 +1,17 @@
 /**
- * W8 HUD harness. Standalone page (never imported by the app) that renders sample
+ * HUD harness. Standalone page (never imported by the app) that renders sample
  * HUD models over a procedural stand-in for the composited frame, for both tints and
- * several geometric edge cases. Run: `npx vite --port 6218 --open /src/hud/__harness__/index.html`.
- * Everything here is synthetic: no camera, no reference pixels.
+ * several geometric edge cases, plus the self-timer countdown and the hold-still ring.
+ * Run: `npx vite --port 6218 --open /src/hud/__harness__/index.html`.
+ * Everything here is synthetic: no camera, no footage pixels.
  */
 import { createHud } from '../index';
 import type { HudHandle } from '../index';
-import type { FaceTrack, HandTrack, SceneState, TrackingFrame, Vec2, Vec3, WindowQuad } from '@/types';
+import type { FaceTrack, HandTrack, HudCountdown, SceneState, TrackingFrame, Vec2, Vec3, WindowQuad } from '@/types';
 
 const SIZE = { width: 1280, height: 720 };
+
+type CountdownAction = HudCountdown['action'];
 
 interface Case {
   title: string;
@@ -16,12 +19,16 @@ interface Case {
   quad: (t: number) => WindowQuad | null;
   face: (t: number) => FaceTrack | null;
   hands?: (quad: WindowQuad) => HandTrack[];
+  /** Show the header countdown: 'selected' uses the chosen action, 'other' the opposite one. */
+  countdown?: 'selected' | 'other';
+  /** Draw the hold-still ring from the header slider. */
+  dwell?: boolean;
 }
 
 function vec(x: number, y: number): Vec2 { return { x, y }; }
 
 function makeQuad(c: [Vec2, Vec2, Vec2, Vec2], opacity = 1): WindowQuad {
-  // Shoelace area + mean edge length, same definitions W7 uses.
+  // Shoelace area + mean edge length, same definitions the interaction module uses.
   const [a, b, cc, d] = c;
   const area = Math.abs((a.x * b.y - b.x * a.y) + (b.x * cc.y - cc.x * b.y) + (cc.x * d.y - d.x * cc.y) + (d.x * a.y - a.x * d.y)) / 2;
   const thickness = (Math.hypot(a.x - d.x, a.y - d.y) + Math.hypot(b.x - cc.x, b.y - cc.y)) / 2;
@@ -84,7 +91,7 @@ const CASES: Case[] = [
     face: () => makeFace(vec(0.5, 0.45), 1.1, 0.7, 0.31),
   },
   {
-    title: 'C — thin 3 px slit (errata §4b.1): corner + eye-left only, no eye-right (area < 0.06)',
+    title: 'C — thin 3 px slit: corner + eye-left only, no eye-right (area < 0.06)',
     scene: LIVE,
     quad: () => makeQuad([vec(0.30, 0.50), vec(0.70, 0.49), vec(0.70, 0.494), vec(0.30, 0.504)]),
     face: () => makeFace(vec(0.5, 0.46), 1, 0),
@@ -102,10 +109,27 @@ const CASES: Case[] = [
     face: () => makeFace(vec(0.04, 0.5), 1, 0),
   },
   {
-    title: 'F — window hidden: nothing but record dot / fps badge',
+    title: 'F — window hidden: record dot / fps badge only — the countdown (header) still shows, it ignores the window',
     scene: LIVE,
     quad: () => null,
     face: () => null,
+    countdown: 'selected',
+  },
+  {
+    title: 'G — self-timer countdown (header: action / seconds left / progress) + hold-still ring at the corner callout (header: dwell)',
+    scene: LIVE,
+    quad: () => makeQuad([vec(0.24, 0.24), vec(0.76, 0.20), vec(0.78, 0.64), vec(0.22, 0.68)]),
+    face: () => makeFace(vec(0.52, 0.44), 1, 0.1),
+    countdown: 'selected',
+    dwell: true,
+  },
+  {
+    title: 'H — the other countdown action on the comic base (red tint), ring too; window at opacity 0.6',
+    scene: COMIC,
+    quad: () => makeQuad([vec(0.26, 0.26), vec(0.74, 0.30), vec(0.72, 0.70), vec(0.28, 0.68)], 0.6),
+    face: () => makeFace(vec(0.5, 0.46), 1.05, 0.2),
+    countdown: 'other',
+    dwell: true,
   },
 ];
 
@@ -114,6 +138,8 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 const controls = {
   animate: $<HTMLInputElement>('animate'), reduced: $<HTMLInputElement>('reduced'), recording: $<HTMLInputElement>('recording'),
   fps: $<HTMLInputElement>('fps'), debug: $<HTMLInputElement>('debug'), opacity: $<HTMLInputElement>('opacity'), font: $<HTMLSelectElement>('font'),
+  countdown: $<HTMLSelectElement>('countdown'), seconds: $<HTMLInputElement>('seconds'), cdProgress: $<HTMLInputElement>('cdProgress'),
+  dwell: $<HTMLInputElement>('dwell'),
   status: $<HTMLSpanElement>('status'),
 };
 
@@ -158,6 +184,13 @@ function drawBackdrop(ctx: CanvasRenderingContext2D, scene: SceneState, quad: Wi
   }
 }
 
+/** Header countdown for a case: null when the case does not show one or the header says "off". */
+function countdownFor(c: Case, action: CountdownAction | '', secondsLeft: number, progress: number): HudCountdown | null {
+  if (!c.countdown || !action) return null;
+  const a: CountdownAction = c.countdown === 'other' ? (action === 'record' ? 'snapshot' : 'record') : action;
+  return { action: a, secondsLeft, progress };
+}
+
 const start = performance.now();
 let frozenT = 0;
 let lastT = 0;
@@ -166,6 +199,10 @@ function frame(now: number): void {
   const t = controls.animate.checked ? now - start : frozenT;
   if (controls.animate.checked) frozenT = t;
   const fontFamily = controls.font.value;
+  const action = controls.countdown.value as CountdownAction | '';
+  const secondsLeft = Math.max(0, Math.round(Number(controls.seconds.value) || 0));
+  const cdProgress = Number(controls.cdProgress.value);
+  const dwellProgress = Number(controls.dwell.value);
   for (const { hud, stage, c } of panels) {
     hud.setOptions({
       reducedMotion: controls.reduced.checked,
@@ -179,7 +216,13 @@ function frame(now: number): void {
       t, sourceWidth: SIZE.width, sourceHeight: SIZE.height,
       hands: q ? (c.hands ?? defaultHands)(q) : [], face, segmentation: null, timings: { handsMs: 0, faceMs: 0, segMs: 0, totalMs: 0 },
     } : null;
-    const model = hud.buildModel(frame, q, c.scene, t, { recording: controls.recording.checked, fps: 57.3 + 2 * Math.sin(t / 2000), showFps: controls.fps.checked });
+    const model = hud.buildModel(frame, q, c.scene, t, {
+      recording: controls.recording.checked,
+      fps: 57.3 + 2 * Math.sin(t / 2000),
+      showFps: controls.fps.checked,
+      countdown: countdownFor(c, action, secondsLeft, cdProgress),
+      dwellProgress: c.dwell ? dwellProgress : null,
+    });
     hud.draw(model);
     const ctx = stage.getContext('2d');
     if (!ctx) continue;
@@ -188,7 +231,8 @@ function frame(now: number): void {
   }
   if (now - lastT > 250) {
     const status = panels[0]?.hud.buildModel(null, CASES[0]?.quad(t) ?? null, LIVE, t, { recording: false, fps: null, showFps: false });
-    controls.status.textContent = `t=${(t / 1000).toFixed(1)}s  corner code ${status?.callouts[0]?.code ?? '—'}  (prefix re-rolls every 0.8 s)`;
+    const cd = action ? `${action} ${secondsLeft}s ${Math.round(cdProgress * 100)}%` : 'off';
+    controls.status.textContent = `t=${(t / 1000).toFixed(1)}s  corner code ${status?.callouts[0]?.code ?? '—'}  (prefix re-rolls every 0.8 s)  countdown ${cd}  dwell ${Math.round(dwellProgress * 100)}%`;
     lastT = now;
   }
   requestAnimationFrame(frame);

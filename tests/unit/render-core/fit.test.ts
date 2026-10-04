@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   coverFit,
+  containFit,
+  fitFor,
+  fitContentRect,
   backingSize,
   internalSize,
   displayToClip,
@@ -44,6 +47,150 @@ describe('coverFit (display uv <- canvas uv mapping)', () => {
     const f = coverFit(0, 0, 100, 100);
     expect(f.uvScale).toEqual([1, 1]);
     expect(f.uvOffset).toEqual([0, 0]);
+  });
+});
+
+describe('containFit (letterbox: whole frame visible, bars outside display uv [0,1])', () => {
+  it('is identity when aspects match', () => {
+    const f = containFit(1280, 720, 1920, 1080);
+    expect(f.uvScale[0]).toBeCloseTo(1, 6);
+    expect(f.uvScale[1]).toBeCloseTo(1, 6);
+    expect(f.uvOffset[0]).toBeCloseTo(0, 6);
+    expect(f.uvOffset[1]).toBeCloseTo(0, 6);
+    expect(f.visible).toEqual({ x: 0, y: 0, w: 1, h: 1 });
+    expect(fitContentRect(f)).toEqual({ x: 0, y: 0, w: 1, h: 1 });
+  });
+
+  it('16:9 video into a 1:1 canvas: full width, bars top and bottom, content centred', () => {
+    const f = containFit(1280, 720, 1000, 1000);
+    // Letterboxed axis: uvScale > 1 and a negative offset, so canvas rows in the bars map outside [0,1].
+    expect(f.uvScale[0]).toBeCloseTo(1, 6);
+    expect(f.uvScale[1]).toBeCloseTo(16 / 9, 6);
+    expect(f.uvOffset[0]).toBeCloseTo(0, 6);
+    expect(f.uvOffset[1]).toBeCloseTo((1 - 16 / 9) / 2, 6);
+    expect(f.uvOffset[1]).toBeLessThan(0);
+    // The whole display frame is visible.
+    expect(f.visible).toEqual({ x: 0, y: 0, w: 1, h: 1 });
+    // Content occupies a centred band 9/16 of the canvas height.
+    const rect = fitContentRect(f);
+    expect(rect.x).toBeCloseTo(0, 6);
+    expect(rect.w).toBeCloseTo(1, 6);
+    expect(rect.h).toBeCloseTo(9 / 16, 6);
+    expect(rect.y).toBeCloseTo((1 - 9 / 16) / 2, 6);
+    expect(rect.y + rect.h / 2).toBeCloseTo(0.5, 6); // centred
+    // canvas centre maps to display centre
+    expect(0.5 * f.uvScale[0] + f.uvOffset[0]).toBeCloseTo(0.5, 6);
+    expect(0.5 * f.uvScale[1] + f.uvOffset[1]).toBeCloseTo(0.5, 6);
+  });
+
+  it('16:9 video into a 9:16 canvas: deeper bars, content still centred', () => {
+    const f = containFit(1280, 720, 1080, 1920);
+    const canvasAspect = 1080 / 1920;
+    const videoAspect = 1280 / 720;
+    expect(f.uvScale[0]).toBeCloseTo(1, 6);
+    expect(f.uvScale[1]).toBeCloseTo(videoAspect / canvasAspect, 6);
+    expect(f.uvOffset[1]).toBeCloseTo((1 - videoAspect / canvasAspect) / 2, 6);
+    const rect = fitContentRect(f);
+    expect(rect.h).toBeCloseTo(canvasAspect / videoAspect, 6); // 0.3164 of the canvas height
+    expect(rect.y).toBeCloseTo((1 - canvasAspect / videoAspect) / 2, 6);
+    expect(rect.y + rect.h / 2).toBeCloseTo(0.5, 6);
+    // Bars: the top 34 % and bottom 34 % of the canvas.
+    expect(rect.y).toBeGreaterThan(0.34);
+    expect(rect.y + rect.h).toBeLessThan(0.66);
+  });
+
+  it('4:3 video into a 16:9 canvas: pillarbox (bars left and right)', () => {
+    const f = containFit(640, 480, 1920, 1080);
+    expect(f.uvScale[1]).toBeCloseTo(1, 6);
+    expect(f.uvScale[0]).toBeCloseTo((1920 / 1080) / (640 / 480), 6);
+    expect(f.uvOffset[0]).toBeCloseTo((1 - f.uvScale[0]) / 2, 6);
+    expect(f.uvOffset[0]).toBeLessThan(0);
+    expect(f.uvOffset[1]).toBeCloseTo(0, 6);
+    const rect = fitContentRect(f);
+    expect(rect.w).toBeCloseTo(0.75, 6);
+    expect(rect.x).toBeCloseTo(0.125, 6);
+    expect(rect.y).toBeCloseTo(0, 6);
+    expect(rect.h).toBeCloseTo(1, 6);
+  });
+
+  it('canvas pixels inside the bars map to display uv outside [0,1]; content pixels map inside', () => {
+    const f = containFit(1280, 720, 1000, 1000);
+    const top = canvasPxToDisplay({ x: 500, y: 100 }, 1000, 1000, f);
+    const bottom = canvasPxToDisplay({ x: 500, y: 900 }, 1000, 1000, f);
+    const centre = canvasPxToDisplay({ x: 500, y: 500 }, 1000, 1000, f);
+    const firstContentRow = canvasPxToDisplay({ x: 500, y: 220 }, 1000, 1000, f);
+    expect(top.y).toBeLessThan(0);
+    expect(bottom.y).toBeGreaterThan(1);
+    expect(centre.x).toBeCloseTo(0.5, 6);
+    expect(centre.y).toBeCloseTo(0.5, 6);
+    expect(firstContentRow.y).toBeGreaterThanOrEqual(0);
+    expect(firstContentRow.y).toBeLessThan(0.01);
+  });
+
+  it('display corners land on the content rect edges and round-trip exactly', () => {
+    const f = containFit(1280, 720, 1000, 1000);
+    const tl = displayToCanvasPx({ x: 0, y: 0 }, 1000, 1000, f);
+    const br = displayToCanvasPx({ x: 1, y: 1 }, 1000, 1000, f);
+    expect(tl.x).toBeCloseTo(0, 6);
+    expect(tl.y).toBeCloseTo(218.75, 6);
+    expect(br.x).toBeCloseTo(1000, 6);
+    expect(br.y).toBeCloseTo(781.25, 6);
+    for (const p of [{ x: 0, y: 0 }, { x: 1, y: 1 }, { x: 0.25, y: 0.75 }, { x: 0.5, y: 0.5 }]) {
+      const back = canvasPxToDisplay(displayToCanvasPx(p, 1000, 1000, f), 1000, 1000, f);
+      expect(back.x).toBeCloseTo(p.x, 9);
+      expect(back.y).toBeCloseTo(p.y, 9);
+    }
+    // Same round trip at a 2× backing store (360×640 for 180×320 css).
+    const portrait = containFit(640, 360, 360, 640);
+    const px = displayToCanvasPx({ x: 0.75, y: 0.7 }, 360, 640, portrait);
+    expect(px.x).toBeCloseTo(270, 6);
+    // content band: 360 × (9/16) = 202.5 px tall, starting at (640 − 202.5) / 2 = 218.75
+    expect(px.y).toBeCloseTo(218.75 + 0.7 * 202.5, 6);
+    const back = canvasPxToDisplay(px, 360, 640, portrait);
+    expect(back.x).toBeCloseTo(0.75, 9);
+    expect(back.y).toBeCloseTo(0.7, 9);
+  });
+
+  it('tolerates degenerate sizes (identity, no NaN)', () => {
+    for (const f of [containFit(0, 0, 100, 100), containFit(100, 100, 0, 0), containFit(Number.NaN, 1, 1, 1), containFit(-5, 10, 10, 10)]) {
+      expect(f.uvScale).toEqual([1, 1]);
+      expect(f.uvOffset).toEqual([0, 0]);
+      expect(f.visible).toEqual({ x: 0, y: 0, w: 1, h: 1 });
+    }
+  });
+
+  it('is the inverse crop of coverFit: content rect of contain == 1 / visible rect of cover', () => {
+    const cover = coverFit(1280, 720, 1000, 1000);
+    const contain = containFit(1280, 720, 1000, 1000);
+    // Cover shows 0.5625 of the display width; contain shows the display in 0.5625 of the canvas height.
+    expect(cover.visible.w).toBeCloseTo(fitContentRect(contain).h, 6);
+    expect(fitContentRect(cover).w).toBeCloseTo(1 / 0.5625, 6); // cover content rect spills outside the canvas
+    expect(fitContentRect(cover).x).toBeLessThan(0);
+  });
+});
+
+describe('fitFor (mode dispatch)', () => {
+  const sizes: [number, number, number, number][] = [
+    [1280, 720, 1920, 1080],
+    [1280, 720, 1080, 1920],
+    [640, 480, 1920, 1080],
+    [640, 360, 360, 360],
+    [640, 360, 360, 640],
+    [640, 360, 640, 200],
+    [0, 0, 100, 100],
+  ];
+
+  it("'cover' returns exactly what coverFit returns (default path unchanged)", () => {
+    for (const s of sizes) expect(fitFor('cover', ...s)).toEqual(coverFit(...s));
+  });
+
+  it("'contain' returns exactly what containFit returns", () => {
+    for (const s of sizes) expect(fitFor('contain', ...s)).toEqual(containFit(...s));
+  });
+
+  it('cover and contain agree only when the aspects match', () => {
+    expect(fitFor('cover', 1280, 720, 1920, 1080)).toEqual(fitFor('contain', 1280, 720, 1920, 1080));
+    expect(fitFor('cover', 1280, 720, 1000, 1000)).not.toEqual(fitFor('contain', 1280, 720, 1000, 1000));
   });
 });
 
@@ -111,6 +258,21 @@ describe('display <-> canvas pixel helpers', () => {
   it('is identity when aspects match', () => {
     const fit = coverFit(1280, 720, 1280, 720);
     expect(displayToCanvasPx({ x: 0.25, y: 0.75 }, 1280, 720, fit)).toEqual({ x: 320, y: 540 });
+  });
+
+  it('accepts either fit: the same display point lands at different pixels under cover and contain', () => {
+    const cover = fitFor('cover', 640, 360, 360, 360);
+    const contain = fitFor('contain', 640, 360, 360, 360);
+    const p = { x: 0.1, y: 0.25 };
+    const a = displayToCanvasPx(p, 360, 360, cover);
+    const b = displayToCanvasPx(p, 360, 360, contain);
+    // cover: display x 0.1 is cropped away (left of the canvas: visible x is 0.219..0.781); contain: it is at a tenth of the width
+    expect(a.x).toBeLessThan(0);
+    expect(b.x).toBeCloseTo(36, 6);
+    expect(a.y).toBeCloseTo(90, 6);
+    expect(b.y).toBeCloseTo(78.75 + 0.25 * 202.5, 6);
+    expect(canvasPxToDisplay(b, 360, 360, contain).x).toBeCloseTo(0.1, 9);
+    expect(canvasPxToDisplay(b, 360, 360, contain).y).toBeCloseTo(0.25, 9);
   });
 });
 

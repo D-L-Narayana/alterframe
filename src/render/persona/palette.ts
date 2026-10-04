@@ -30,7 +30,7 @@ export const PERSONA_PALETTE = {
   },
 } as const;
 
-/** Iris colour for the portrait eye accent (contract: brown #5a3a1a). Not a token; kept here, not in the palette map. */
+/** Iris colour for the portrait eye accent (authored brown #5a3a1a). Not a token; kept here, not in the palette map. */
 export const PORTRAIT_IRIS = '#5a3a1a';
 
 /** `#rrggbb` → `rgba(r,g,b,a)`. Alpha is emitted as-is so callers can pass 0.55 etc. */

@@ -5,7 +5,7 @@
  * Orientation: all uploads keep UNPACK_FLIP_Y = false, so texel row 0 is the TOP row of the source.
  * Combined with the v_uv convention in fit.ts, no sampler needs a y flip. Mirroring is applied ONLY
  * to the video, in the ingest pass (compositor.ts) — the mask, overlays and HUD arrive already
- * mirrored in display space (W3/W6/W8).
+ * mirrored in display space (tracker, persona layer, HUD).
  */
 import type { DirtyCanvas, SegmentationResult } from '@/types';
 import { createTexture } from './gl';

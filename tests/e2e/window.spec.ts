@@ -2,7 +2,7 @@
  * Window behaviour with MOCK tracking (owner: W10). Uses the dev-only `injectTracking` hook:
  *  - quad visible when two hands, hidden when none (pixel diff inside/outside the expected quad)
  *  - persona cycles exactly once after together → open (our optional gesture, contract §W7.2)
- *  - left-side mock hand lands on screen-left (mirroring applied exactly once, lead-checklist B2)
+ *  - left-side mock hand lands on screen-left (mirroring applied exactly once)
  */
 import { test, expect } from '@playwright/test';
 import { captureConsole, startMockSession, stagePixels, regionDiff, waitFrames, canvasBox, coverRect } from './helpers/app';

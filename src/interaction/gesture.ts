@@ -1,6 +1,6 @@
 /**
- * W7 — hands-together → open persona-cycle gesture (optional design interpretation; the
- * reference reel's persona changes are edit cuts, see reference-analysis §4b.2).
+ * W7 — hands-together → open persona-cycle gesture (optional design interpretation: in the
+ * original reel the persona changes are edit cuts, not gestures).
  *
  * State machine
  *   idle ──(palms within togetherDistance AND window area < openArea/2 for togetherArmMs)──▶ armed

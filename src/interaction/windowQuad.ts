@@ -1,8 +1,8 @@
 /**
  * W7 — hand-window quad geometry (pure).
  *
- * Corners come from the index fingertip and thumb tip of the two best hands
- * (reference-analysis §2.1). Everything is in normalized display space.
+ * Corners come from the index fingertip and thumb tip of the two best hands.
+ * Everything is in normalized display space.
  */
 import type { HandTrack, InteractionSettings, QuadCorners, Vec2, WindowQuad, WindowOrdering } from '../types';
 
@@ -127,7 +127,7 @@ function splitTopBottom(h: HandTrack, prevTop: Vec2 | null, prevBottom: Vec2 | n
   return dy <= 0 ? { top: h.indexTip, bottom: h.thumbTip } : { top: h.thumbTip, bottom: h.indexTip };
 }
 
-/** Convex (non-self-intersecting) ordering; see ten-worker-contracts W7.1. */
+/** Convex (non-self-intersecting) ordering: un-crosses the naive tip order so the quad never becomes a bow-tie. */
 export function orderConvex(left: HandTrack, right: HandTrack, prev: WindowQuad | null): QuadCorners {
   const usePrev = prev && prev.ordering === 'convex' && prev.visible ? prev : null;
   const L = splitTopBottom(left, usePrev ? usePrev.corners[0] : null, usePrev ? usePrev.corners[3] : null);

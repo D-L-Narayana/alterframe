@@ -103,6 +103,7 @@ async function main(): Promise<void> {
         hudOverlay: null,
         glitch: opts.glitch ?? 0,
         quality: { ...DEFAULT_QUALITY },
+        fitMode: 'cover',
         time: 0,
       };
       renderer.render(inputs);

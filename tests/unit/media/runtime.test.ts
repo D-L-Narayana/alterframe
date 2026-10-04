@@ -3,7 +3,7 @@ import { startRuntime, getActiveRuntime, subscribeRuntime, DEV_BRIDGE_ENABLED, t
 import { resolveFactories } from '@/runtime/factories';
 import { computeGlitch } from '@/runtime/glitch';
 import type { QualitySettings, WindowQuad } from '@/types';
-import { FakeSource, fakeCanvas, flush, frameWithHands, makeStore, recordingFactories } from './runtimeHarness';
+import { FakeSource, fakeCanvas, fakeEnv, flush, frameWithHands, makeStore, recordingFactories } from './runtimeHarness';
 
 const quad = (thickness: number, visible = true): WindowQuad => ({
   corners: [
@@ -32,25 +32,23 @@ async function boot(opts: { source?: FakeSource; store?: ReturnType<typeof makeS
   const store = opts.store ?? makeStore();
   const canvas = opts.canvas ?? fakeCanvas();
   const rec = recordingFactories(opts.factoryOverrides);
-  let now = 0;
-  const handle = startRuntime(
-    { canvas, store, source },
-    { factories: rec.factories, env: { now: () => now, devicePixelRatio: () => opts.dpr ?? 2 }, sessionSyncMs: 0, adaptiveIntervalMs: 0 },
-  );
+  const fe = fakeEnv(opts.dpr ?? 2);
+  const handle = startRuntime({ canvas, store, source }, { factories: rec.factories, env: fe.env, sessionSyncMs: 0, adaptiveIntervalMs: 0 });
   handles.push(handle);
   await handle.ready;
   await handle.trackerReady;
   await flush();
-  return { handle, source, store, canvas, rec, setNow: (t: number) => (now = t) };
+  return { handle, source, store, canvas, rec, setNow: fe.setNow };
 }
 
 describe('computeGlitch', () => {
-  const base = { reducedMotion: false };
-  it('is 0 by default (lead erratum: slit static is not a glitch)', () => {
+  // The setting is typed on SettingsSlice; the default (false) keeps the slit effect off.
+  const base = { reducedMotion: false, thinStripGlitch: false };
+  it('is 0 by default (slit static is not a glitch)', () => {
     expect(computeGlitch(quad(0.001), base)).toBe(0);
   });
   it('follows clamp(1 - thickness/0.04) only when thinStripGlitch is enabled', () => {
-    const on = { reducedMotion: false, thinStripGlitch: true } as typeof base;
+    const on = { reducedMotion: false, thinStripGlitch: true };
     expect(computeGlitch(quad(0), on)).toBe(1);
     expect(computeGlitch(quad(0.02), on)).toBeCloseTo(0.5);
     expect(computeGlitch(quad(0.1), on)).toBe(0);
@@ -58,7 +56,7 @@ describe('computeGlitch', () => {
     expect(computeGlitch(null, on)).toBe(0);
   });
   it('is 0 under reduced motion even when enabled', () => {
-    expect(computeGlitch(quad(0), { reducedMotion: true, thinStripGlitch: true } as typeof base)).toBe(0);
+    expect(computeGlitch(quad(0), { reducedMotion: true, thinStripGlitch: true })).toBe(0);
   });
 });
 
@@ -97,6 +95,7 @@ describe('startRuntime loop', () => {
     const { source, rec, handle } = await boot();
     rec.calls.length = 0;
     source.emitFrame(16);
+    // (renderer.warm runs in idle time, not per frame — see runtimeFeatures.test.ts.)
     expect(rec.calls).toEqual([
       'tracker.update',
       'interaction.update',
@@ -197,14 +196,15 @@ describe('startRuntime loop', () => {
     expect(rec.renderInputs.at(-1)!.hudOverlay).toBeNull();
   });
 
-  it('forwards mirrored / segmentationStride changes to tracker.setOptions once', async () => {
+  it('forwards mirrored / segmentationStride changes to tracker.setOptions once (changed keys only)', async () => {
     const { source, rec, store } = await boot();
     source.emitFrame(16);
     expect(rec.setOptions).toEqual([]);
     store.getState().setSettings({ mirrored: false });
     source.emitFrame(33);
     source.emitFrame(50);
-    expect(rec.setOptions).toEqual([{ mirrored: false, segmentationStride: 1 }]);
+    // v0.2: only the keys that changed travel (inferenceMaxHeight/faceStride join the set; see runtimeFeatures.test.ts).
+    expect(rec.setOptions).toEqual([{ mirrored: false }]);
     expect(rec.renderInputs.at(-1)!.mirrored).toBe(false);
   });
 
@@ -253,7 +253,7 @@ describe('startRuntime loop', () => {
   });
 
   it('adaptive quality writes the policy result into settings', async () => {
-    const lowered: QualitySettings = { renderScale: 0.85, maxDpr: 2, segmentationStride: 1 };
+    const lowered: QualitySettings = { renderScale: 0.85, maxDpr: 2, segmentationStride: 1, inferenceMaxHeight: 720, faceStride: 1 };
     const { source, store } = await boot({ factoryOverrides: { adaptivePolicy: { evaluate: (_s, cur) => (cur.renderScale === 1 ? lowered : null) } } });
     source.emitFrame(16);
     expect(store.getState().quality).toEqual(lowered);
@@ -262,7 +262,7 @@ describe('startRuntime loop', () => {
   });
 
   it('does not touch quality when adaptiveQuality is off', async () => {
-    const lowered: QualitySettings = { renderScale: 0.85, maxDpr: 2, segmentationStride: 1 };
+    const lowered: QualitySettings = { renderScale: 0.85, maxDpr: 2, segmentationStride: 1, inferenceMaxHeight: 720, faceStride: 1 };
     const { source, store } = await boot({ factoryOverrides: { adaptivePolicy: { evaluate: () => lowered } } });
     store.getState().setSettings({ adaptiveQuality: false });
     source.emitFrame(16);

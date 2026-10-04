@@ -1,7 +1,7 @@
 /**
  * HUD code generation.
  *
- * The reference shows 7-digit codes whose last five digits are fixed per anchor
+ * The source footage shows 7-digit codes whose last five digits are fixed per anchor
  * (`10100` corner, `10301` first eye, `10502` second eye) while the two leading
  * digits re-roll every ~0.8 s in a non-monotonic way. We reproduce that with a
  * deterministic integer hash of the 800 ms time slot and a seed, so unit tests

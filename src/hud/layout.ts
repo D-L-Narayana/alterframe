@@ -2,7 +2,7 @@ import type { Size, Vec2 } from '@/types';
 
 /** Pure pixel-space layout math for the HUD (unit tested; no canvas access). */
 
-/** Font size = 1.85 % of canvas height (≈ 20 px at 1080p, matching the reference). */
+/** Font size = 1.85 % of canvas height (≈ 20 px at 1080p, matching the source footage). */
 export const FONT_HEIGHT_RATIO = 0.0185;
 export const MIN_FONT_PX = 11;
 /** Label baseline sits this far above the anchor. */
@@ -13,7 +13,7 @@ export const RIGHT_ALIGN_THRESHOLD_X = 0.7;
 export const BRACKET_SIZE_PX = 6;
 /** Minimum distance from any canvas edge for text/brackets. */
 export const EDGE_PAD_PX = 4;
-/** Manual letter-spacing as a fraction of the font size (plan §3: 0.04em). */
+/** Manual letter-spacing as a fraction of the font size (0.04 em). */
 export const TRACKING_EM = 0.04;
 /** Record dot radius-doubling size and 1 Hz blink period. */
 export const RECORD_DOT_PX = 10;
@@ -98,4 +98,89 @@ export function trackedWidth(glyphWidths: readonly number[], tracking: number): 
 
 export function fpsBadgeText(fps: number): string {
   return `${Math.round(fps)} fps`;
+}
+
+// ----------------------------------------------------------------- countdown
+
+/** Cap height of the HUD face as a fraction of the font size (Inter ≈ 0.75 em). */
+export const CAP_HEIGHT_EM = 0.75;
+/** Countdown numeral = 18 % of canvas height, never below 48 px. */
+export const COUNTDOWN_FONT_HEIGHT_RATIO = 0.18;
+export const COUNTDOWN_MIN_FONT_PX = 48;
+/** The countdown ignores the window opacity and is drawn at this alpha. */
+export const COUNTDOWN_ALPHA = 0.9;
+/** Small label drawn above the numeral, per countdown action. */
+export const COUNTDOWN_LABELS = { record: 'RECORDING IN', snapshot: 'SNAPSHOT IN' } as const;
+/** Progress (0..1) is quantized into this many steps (5 %) for the dedupe key and the drawn arcs. */
+export const PROGRESS_BUCKETS = 20;
+
+export interface CountdownLayout {
+  /** Canvas centre in pixels (numeral and ring are centred here). */
+  center: Vec2;
+  fontPx: number;
+  /** Numeral baseline: the cap height is centred on `center.y`. */
+  baselineY: number;
+  labelFontPx: number;
+  labelBaselineY: number;
+  ringRadius: number;
+}
+
+/** Gap between the label baseline and the numeral's cap top, in numeral ems. */
+export const COUNTDOWN_LABEL_GAP_EM = 0.12;
+/** Radius of the thin progress arc around the numeral, in numeral ems (clears two digits). */
+export const COUNTDOWN_RING_RADIUS_EM = 0.8;
+/** Stroke width of the progress arcs (countdown ring and dwell ring), device px. */
+export const RING_LINE_PX = 1.5;
+/** Arcs start at 12 o'clock and run clockwise (canvas y grows downwards). */
+export const RING_START_ANGLE = -Math.PI / 2;
+
+export function countdownFontPx(canvasHeight: number): number {
+  const px = Math.round(COUNTDOWN_FONT_HEIGHT_RATIO * (Number.isFinite(canvasHeight) ? canvasHeight : 0));
+  return Math.max(COUNTDOWN_MIN_FONT_PX, px);
+}
+
+/** Numeral, label and ring geometry for a canvas of `size` (device px). */
+export function countdownLayout(size: Size): CountdownLayout {
+  const center = { x: Math.round(size.width / 2), y: Math.round(size.height / 2) };
+  const fontPx = countdownFontPx(size.height);
+  const capHeight = fontPx * CAP_HEIGHT_EM;
+  const baselineY = Math.round(center.y + capHeight / 2);
+  const labelFontPx = hudFontPx(size.height);
+  const labelBaselineY = Math.round(baselineY - capHeight - fontPx * COUNTDOWN_LABEL_GAP_EM);
+  // Keep the ring inside the padded canvas on narrow (portrait) frames.
+  const fit = Math.floor(Math.min(size.width, size.height) / 2) - EDGE_PAD_PX;
+  const ringRadius = Math.max(1, Math.min(Math.round(fontPx * COUNTDOWN_RING_RADIUS_EM), fit));
+  return { center, fontPx, baselineY, labelFontPx, labelBaselineY, ringRadius };
+}
+
+/** Numeral text: whole seconds rounded up, never negative; empty when not finite (nothing drawn). */
+export function countdownText(secondsLeft: number): string {
+  if (!Number.isFinite(secondsLeft)) return '';
+  return String(Math.max(0, Math.ceil(secondsLeft)));
+}
+
+/** Quantize 0..1 progress into 5 % steps (0..20); clamps the range, non-finite → 0. */
+export function progressBucket(progress: number): number {
+  if (!Number.isFinite(progress)) return 0;
+  return Math.round(Math.min(1, Math.max(0, progress)) * PROGRESS_BUCKETS);
+}
+
+/**
+ * End angle of a progress arc that starts at 12 o'clock. Uses the quantized
+ * progress so that equal dedupe keys always draw equal arcs.
+ */
+export function arcEndAngle(progress: number): number {
+  return RING_START_ANGLE + (progressBucket(progress) / PROGRESS_BUCKETS) * Math.PI * 2;
+}
+
+// ---------------------------------------------------------------- dwell ring
+
+/** Hold-still ring radius at 720p; scales linearly with the canvas height. */
+export const DWELL_RING_RADIUS_720_PX = 14;
+/** Smallest ring that still reads as a ring on tiny canvases. */
+export const DWELL_RING_MIN_PX = 4;
+
+export function dwellRingRadiusPx(canvasHeight: number): number {
+  const h = Number.isFinite(canvasHeight) ? canvasHeight : 0;
+  return Math.max(DWELL_RING_MIN_PX, Math.round((DWELL_RING_RADIUS_720_PX * h) / 720));
 }

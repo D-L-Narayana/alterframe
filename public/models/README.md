@@ -12,6 +12,20 @@ way from `/wasm/` (copied from `node_modules/@mediapipe/tasks-vision/wasm` by `s
 | `face_landmarker.task` | FaceLandmarker (478 landmarks, 52 blendshapes, transform matrix) | 3,758,596 B | https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task |
 | `selfie_segmenter.tflite` | ImageSegmenter (single label `selfie`, 256×256 input, confidence mask) | 249,537 B | https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite |
 
+## Inference resolution and face stride (quality rungs)
+
+Two tracker options trade accuracy for speed without touching the model files: `inferenceMaxHeight`
+(default 720 — a 720p camera frame is not resampled) and `faceStride` (default 1 — the face runs on
+every analysed frame). When the source is taller than the cap, the tracker draws each analysed frame
+once into an internal even-sized canvas (height = cap, width by aspect: 1280×720 → 854×480 or
+640×360) and hands **that canvas** to all three models — the only thing downscaled is the frame the
+models see. Not downscaled: the displayed video and recordings, the 256×256 mask output, the
+normalized landmark coordinates (MediaPipe reports [0,1] positions of whatever image it is given, so
+nothing is remapped) and the models themselves, which still resize their input to their own fixed
+tensor sizes internally. `faceStride: N` runs the face landmarker only every N analysed frames and
+reuses the previous face in between; hands and segmentation keep their own cadence. Models and
+licences are unchanged.
+
 ## Licence
 
 All three models and the `@mediapipe/tasks-vision` runtime are published by Google under the

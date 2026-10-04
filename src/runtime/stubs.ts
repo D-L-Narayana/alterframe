@@ -1,15 +1,10 @@
 /**
- * TEMPORARY no-op implementations of every module interface the runtime loop
- * consumes. Purpose: the loop compiles and runs before the other nine workers'
- * modules land, and unit tests can spy on call order with deterministic
- * behaviour.
- *
- * Status: `src/runtime/factories.ts` prefers the real modules and only falls
- * back to a stub when a module is absent; `RuntimeHandle.modules.stubbed`
- * lists any stub still in use at runtime so the integration step can confirm
- * "zero stubs". The stub renderer draws the video cover-fit with a Canvas2D
- * context (when one exists) so the media harness shows pixels; it is not a
- * compositor.
+ * TEST-ONLY no-op implementations of every module interface the runtime loop
+ * consumes (`tests/unit/media/runtimeHarness.ts` wraps them to spy on call
+ * order with deterministic behaviour). The app never resolves to a stub:
+ * `src/runtime/factories.ts` imports the real modules and `modules.stubbed`
+ * is always empty. The stub renderer draws the video cover-fit with a Canvas2D
+ * context (when one exists); it is not a compositor.
  */
 import type {
   AdaptiveQualityPolicy,
@@ -109,7 +104,7 @@ export const createStubTracker: CreateTracker = (opts = {}, onProgress) => {
 export function createStubRenderer(): Renderer {
   let canvas: HTMLCanvasElement | null = null;
   let ctx: CanvasRenderingContext2D | null = null;
-  const stats = { lastFrameMs: 0, passes: 0 };
+  const stats = { lastFrameMs: 0, passes: 0, gpuMs: null as number | null };
   return {
     async init(c) {
       canvas = c;

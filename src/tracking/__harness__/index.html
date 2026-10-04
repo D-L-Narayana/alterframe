@@ -27,6 +27,8 @@
       <label>Delegate <select id="delegate"><option>GPU</option><option>CPU</option></select></label>
       <label><input type="checkbox" id="mirror" checked /> mirrored</label>
       <label>seg stride <input type="number" id="stride" min="1" max="6" value="1" style="width:3em" /></label>
+      <label>tracking res <select id="res"><option value="720">720 (full)</option><option value="480">480p</option><option value="360">360p</option></select></label>
+      <label>face stride <input type="number" id="face-stride" min="1" max="6" value="1" style="width:3em" /></label>
       <progress id="progress" max="1" value="0"></progress>
       <span id="status" class="muted">idle</span>
     </header>

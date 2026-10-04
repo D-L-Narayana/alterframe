@@ -2,9 +2,12 @@
  * Dev harness for the persona layer (W6). Not wired into the app.
  * Run: npx vite --port 6216 --open /src/render/persona/__harness__/index.html
  * URL params: ?persona=masked&roll=20&blink=0.3&mouth=0.4&animate=0&reduced=1&landmarks=1&t=1200
+ *             &strength=0.5 (overlay strength 0..1) &headx=0 (no head drift) &facex=0.35 (fixed head x)
+ * Squint: the masked lenses follow eye openness — use the blink toggle or ?blink=0.3.
+ * Parallax: with the masked persona the city slides against the head x (toggle "head x drift" or drag "Head x").
  */
-import type { FaceTrack, PersonaId, SceneState, TrackingFrame, Vec3 } from '../../../types';
-import { FACE_LM } from '../../../types';
+import type { FaceTrack, LookSettings, PersonaId, SceneState, TrackingFrame, Vec3 } from '../../../types';
+import { DEFAULT_LOOK, FACE_LM } from '../../../types';
 import { createPersonaLayer, FACE_OVAL_INDICES, LEFT_EYE_RING, RIGHT_EYE_RING, LIPS_OUTER_RING } from '../index';
 
 const W = 1280, H = 720;
@@ -104,8 +107,13 @@ const animateCb = $<HTMLInputElement>('animate');
 const blinkCb = $<HTMLInputElement>('blink');
 const reducedCb = $<HTMLInputElement>('reduced');
 const landmarksCb = $<HTMLInputElement>('landmarks');
+const headxCb = $<HTMLInputElement>('headx');
 const rollInput = $<HTMLInputElement>('roll');
 const rollV = $<HTMLSpanElement>('rollv');
+const strengthInput = $<HTMLInputElement>('strength');
+const strengthV = $<HTMLSpanElement>('strengthv');
+const facexInput = $<HTMLInputElement>('facex');
+const facexV = $<HTMLSpanElement>('facexv');
 const stats = $<HTMLSpanElement>('stats');
 
 if (q.get('persona')) personaSel.value = q.get('persona')!;
@@ -113,7 +121,10 @@ if (q.get('animate') === '0') animateCb.checked = false;
 if (q.get('blink') !== null) blinkCb.checked = false;
 if (q.get('reduced') === '1') reducedCb.checked = true;
 if (q.get('landmarks') === '1') landmarksCb.checked = true;
+if (q.get('headx') === '0') headxCb.checked = false;
 if (q.get('roll')) rollInput.value = q.get('roll')!;
+if (q.get('strength') !== null) strengthInput.value = String(Math.round(Number(q.get('strength')) * 100));
+if (q.get('facex') !== null) { facexInput.value = String(Math.round(Number(q.get('facex')) * 100)); headxCb.checked = false; }
 const fixedT = q.get('t') ? Number(q.get('t')) : null;
 
 const composite = $<HTMLCanvasElement>('composite').getContext('2d')!;
@@ -137,12 +148,20 @@ function frame(now: number): void {
   const blinkPhase = (t % 3200) / 3200;
   const eyeOpen = q.get('blink') !== null ? Number(q.get('blink')) : blinkCb.checked ? (blinkPhase > 0.9 ? Math.abs(Math.cos((blinkPhase - 0.9) / 0.1 * Math.PI)) : 1) : 1;
   const mouthOpen = q.get('mouth') !== null ? Number(q.get('mouth')) : animate ? (Math.sin(t / 900) + 1) * 0.25 : 0;
-  const face = synthFace({ cx: 0.5 + (animate ? Math.sin(t / 2300) * 0.04 : 0), cy: 0.34, rx: 0.085, ry: 0.19, roll: (rollDeg * Math.PI) / 180, eyeOpen, mouthOpen });
+  // head x: sinusoidal drift (animate + "head x drift"), else the manual slider
+  const drift = animate && headxCb.checked;
+  const faceX = drift ? 0.5 + Math.sin(t / 2300) * 0.04 : Number(facexInput.value) / 100;
+  if (drift) facexInput.value = String(Math.round(faceX * 100));
+  facexV.textContent = faceX.toFixed(2);
+  const strength = Number(strengthInput.value) / 100;
+  strengthV.textContent = strength.toFixed(2);
+  const look: LookSettings = { ...DEFAULT_LOOK, overlayStrength: strength };
+  const face = synthFace({ cx: faceX, cy: 0.34, rx: 0.085, ry: 0.19, roll: (rollDeg * Math.PI) / 180, eyeOpen, mouthOpen });
   const tf: TrackingFrame = { t, sourceWidth: W, sourceHeight: H, hands: [], face, segmentation: null, timings: { handsMs: 0, faceMs: 0, segMs: 0, totalMs: 0 } };
   const scene: SceneState = { base: 'live', persona: personaSel.value as PersonaId, hudTint: 'white' };
 
   const before = { o: layer.overlay.__dirty, b: layer.backdrop.__dirty };
-  layer.update(tf, scene, t);
+  layer.update(tf, scene, t, look);
   if (layer.overlay.__dirty && !before.o) repaints++;
   frames++;
 
@@ -161,24 +180,25 @@ function frame(now: number): void {
   videoView.fillStyle = '#c9c4bb'; videoView.fillRect(0, 0, W, H); drawSyntheticPerson(videoView, face);
 
   layer.overlay.__dirty = false; layer.backdrop.__dirty = false;
-  if (frames % 30 === 0) stats.textContent = `frames ${frames} · overlay repaints ${repaints}`;
-  (window as unknown as { __personaHarness: unknown }).__personaHarness = { frames, repaints, persona: scene.persona, bench };
+  if (frames % 30 === 0) stats.textContent = `frames ${frames} · overlay repaints ${repaints} · strength ${strength.toFixed(2)} · head x ${faceX.toFixed(2)}`;
+  (window as unknown as { __personaHarness: unknown }).__personaHarness = { frames, repaints, persona: scene.persona, strength, faceX, eyeOpen, bench };
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 
-/** Micro-benchmark: force N overlay repaints (changing roll) and report ms per update. */
-function bench(persona: PersonaId, n = 60): { overlayMsPerUpdate: number; backdropMsPerPaint: number } {
+/** Micro-benchmark: force N overlay repaints (changing roll) and report ms per update. Default look unless `strength` is given. */
+function bench(persona: PersonaId, n = 60, strength = 1): { overlayMsPerUpdate: number; backdropMsPerPaint: number } {
   const l = createPersonaLayer({ reducedMotion: false });
   l.resize(size);
   const scene: SceneState = { base: 'live', persona, hudTint: 'white' };
+  const look: LookSettings = { ...DEFAULT_LOOK, overlayStrength: strength };
   const mk = (i: number): TrackingFrame => ({ t: i * 16, sourceWidth: W, sourceHeight: H, hands: [], face: synthFace({ cx: 0.5, cy: 0.42, rx: 0.085, ry: 0.19, roll: (i / n) * 0.6 - 0.3, eyeOpen: 1, mouthOpen: 0 }), segmentation: null, timings: { handsMs: 0, faceMs: 0, segMs: 0, totalMs: 0 } });
-  l.update(mk(0), scene, 0); // warm-up paints both
+  l.update(mk(0), scene, 0, look); // warm-up paints both
   const t0 = performance.now();
-  for (let i = 1; i <= n; i++) l.update(mk(i), scene, 0); // t fixed → backdrop static, overlay repaints
+  for (let i = 1; i <= n; i++) l.update(mk(i), scene, 0, look); // t fixed → backdrop static, overlay repaints
   const overlayMs = (performance.now() - t0) / n;
   const t1 = performance.now();
-  for (let i = 1; i <= n; i++) l.update(mk(0), scene, i * 40); // overlay static, backdrop ticks (masked only)
+  for (let i = 1; i <= n; i++) l.update(mk(0), scene, i * 40, look); // overlay static, backdrop ticks (masked only)
   const backdropMs = (performance.now() - t1) / n;
   return { overlayMsPerUpdate: overlayMs, backdropMsPerPaint: backdropMs };
 }

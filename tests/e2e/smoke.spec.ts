@@ -41,15 +41,42 @@ test.describe('smoke', () => {
     con.assertClean();
   });
 
-  test('fps badge appears via the F shortcut and updates', async ({ page }) => {
+  test('F toggles the fps badge; it mirrors the live frame-rate of a running loop', async ({ page }) => {
+    test.slow(); // real tracker: synchronous MediaPipe wasm init on SwiftShader takes 10–30 s inside this test
     await gotoApp(page);
     await startCamera(page);
+    // Liveness baseline taken right away (dev-server handle; no mock mode needed): the loop's frame counter
+    // is measured across the whole test rather than in a tail poll that depends on leftover budget.
+    const frames = () => page.evaluate(() => (window.__alterframe as unknown as { frameCount?: number } | undefined)?.frameCount ?? -1);
+    const f0 = await frames();
+    expect(f0, 'dev runtime handle exposes frameCount').toBeGreaterThanOrEqual(0);
     await stage(page).focus().catch(() => undefined);
+    // One locator for both states (absent / shown).
+    const badge = page.locator('.af-badge').filter({ hasText: /\d+\s*fps/i });
+    await expect(badge, 'hidden by default').toHaveCount(0);
     await page.keyboard.press('f');
-    const badge = page.getByText(/\d+\s*fps/i).first();
-    await expect(badge, 'fps badge (contract §W1.7, toggled with F)').toBeVisible({ timeout: 15_000 });
-    const first = await badge.textContent();
-    await expect.poll(async () => badge.textContent(), { timeout: 10_000 }).not.toBe(first);
+    await expect(badge, 'F shows the fps badge').toBeVisible({ timeout: 15_000 });
+    await expect(badge).toHaveText(/^\d+ fps$/);
+    await expect(badge).toHaveAttribute('aria-label', /^\d+ frames per second$/);
+    // Liveness of the loop behind the badge: the frame counter advanced since the baseline (usually already true here).
+    await expect.poll(frames, { message: 'frames keep being rendered while the badge is shown' }).toBeGreaterThan(f0 + 1);
+    // Mirror contract: badge text == rounded live stats, read in ONE browser-side step; the store is synced from
+    // the stats at ≤ 250 ms cadence, so one sync period of lag is the only legitimate difference. A steady rate is
+    // a legitimate product state, so the badge is never required to *change* within a wall-clock window.
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => {
+            const el = document.querySelector('.af-badge');
+            const h = window.__alterframe as unknown as { getStats(): { fps: number } } | undefined;
+            const shown = Number((el?.textContent ?? '').split(' ')[0]);
+            return h && el ? Math.abs(shown - Math.round(h.getStats().fps)) : NaN;
+          }),
+        { message: 'badge mirrors the live fps within one sync period' },
+      )
+      .toBeLessThanOrEqual(1);
+    await page.keyboard.press('f');
+    await expect(badge, 'F hides the badge again').toHaveCount(0);
   });
 
   test('no third-party network requests after load', async ({ page }) => {

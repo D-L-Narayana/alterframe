@@ -1,8 +1,9 @@
 /**
- * Procedural, original test scene for the W5 harness (NOT a photo, nothing from the reel):
+ * Procedural, original test scene for the shader harness (NOT a photo, nothing from the reel):
  * a warm room with a door edge, a poster and a lamp line; a person with dark hair, skin
  * ellipse, two eyes, lips and a grey hoodie; sensor-like noise. Also produces the matching
- * person mask and the three persona backdrops as plain canvases.
+ * person mask, the three persona backdrops and a plain grey ramp (for counting quantisation
+ * bands) as plain canvases.
  *
  * Probe points (normalized display coords) are exported so the verify script and the page
  * agree on what is "wall", "skin", "edge", etc.
@@ -172,6 +173,22 @@ export function makeMask(w = 256, h = 256): HTMLCanvasElement {
   ctx.beginPath();
   ctx.ellipse(0.5 * w, 0.4 * h, 0.1 * w, 0.23 * h, 0, 0, Math.PI * 2);
   ctx.fill();
+  return c;
+}
+
+/**
+ * Horizontal grey ramp, black at the left edge → white at the right edge, no noise. Run through
+ * the quantise pass this yields one flat plateau per band, so the number of distinct luma
+ * levels along a row equals `u_bands` (used by verify.mjs for the `look.bands` check).
+ */
+export function makeRamp(w = SCENE_W, h = SCENE_H): HTMLCanvasElement {
+  const c = canvas(w, h);
+  const ctx = ctx2d(c);
+  const g = ctx.createLinearGradient(0, 0, w, 0);
+  g.addColorStop(0, '#000000');
+  g.addColorStop(1, '#ffffff');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
   return c;
 }
 

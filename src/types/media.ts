@@ -11,6 +11,23 @@ export interface CameraOptions {
 
 export type SourceStatus = 'idle' | 'requesting' | 'ready' | 'denied' | 'unavailable' | 'error';
 
+/** Playback controls of a file source (cameras have none). */
+export interface FileTransport {
+  play(): Promise<boolean>;
+  pause(): void;
+  /** Seek to an absolute position in seconds (clamped to [0, duration]). */
+  seek(seconds: number): void;
+  setLoop(loop: boolean): void;
+  readonly paused: boolean;
+  readonly currentTime: number;
+  /** Seconds; NaN until metadata is known. */
+  readonly duration: number;
+  readonly loop: boolean;
+}
+
+/** Snapshot of a FileTransport mirrored into the session slice for the UI. */
+export interface TransportState { paused: boolean; currentTime: number; duration: number; loop: boolean }
+
 export interface FrameSource {
   readonly kind: SourceKind;
   readonly video: HTMLVideoElement;
@@ -25,6 +42,12 @@ export interface FrameSource {
   onFrame(cb: (t: number, meta: { presentedFrames: number }) => void): () => void;
   /** Enumerated devices (camera sources only). */
   listDevices?(): Promise<MediaDeviceInfo[]>;
+  /** Human-readable error for `denied | unavailable | error`, else null. */
+  readonly error?: string | null;
+  /** Fires on every status transition. Returns unsubscribe. */
+  onStatus?(cb: (status: SourceStatus, error: string | null) => void): () => void;
+  /** Playback controls (file sources only). */
+  readonly transport?: FileTransport;
 }
 
 export interface RuntimeStats { fps: number; frameMs: number; trackingMs: number; renderMs: number }

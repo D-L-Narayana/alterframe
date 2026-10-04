@@ -3,13 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>W5 shader harness — AlterFrame</title>
+    <title>Shader harness — AlterFrame</title>
     <style>
       body { margin: 0; padding: 16px; background: #0b0b0d; color: #f2f2f4; font: 14px/1.4 system-ui, sans-serif; }
       h1 { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
       #status { margin-bottom: 12px; color: #9a9aa3; }
       #status[data-ok="true"] { color: #6fe39a; }
       #status[data-ok="false"] { color: #ff6b6b; }
+      #look { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,.04); }
+      #look legend { font-size: 12px; color: #9a9aa3; padding: 0; }
+      #look label { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #9a9aa3; }
+      #look input[type="range"] { width: 120px; }
+      #look output { min-width: 3.5ch; color: #f2f2f4; font-variant-numeric: tabular-nums; }
+      #look button { font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.14); background: transparent; color: #f2f2f4; }
+      #look .note { flex-basis: 100%; font-size: 11px; color: #6f6f78; }
       #root { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
       figure { margin: 0; }
       canvas { width: 100%; height: auto; display: block; border-radius: 10px; border: 1px solid rgba(255,255,255,.08); }
@@ -17,8 +24,9 @@
     </style>
   </head>
   <body>
-    <h1>W5 stylization passes — procedural test scene (no photos)</h1>
+    <h1>Stylization passes — procedural test scene (no photos)</h1>
     <div id="status">compiling…</div>
+    <fieldset id="look"><legend>Look (the first two preset tiles follow these sliders; defaults = the untuned render)</legend></fieldset>
     <div id="root"></div>
     <script type="module" src="./main.tsx"></script>
   </body>

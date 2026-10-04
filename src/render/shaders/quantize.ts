@@ -6,6 +6,9 @@
  * scaling RGB with the new/old luminance ratio, then chroma is boosted ×1.25 (the
  * reference illustration is noticeably more saturated than the camera).
  *
+ * Look: `look.bands` sets the band count (whole numbers 3..8; 6 = authored), and
+ * `look.saturation` multiplies the chroma boost (0 = greyscale cel, 1 = authored).
+ *
  * Variants:
  *  - clean (paper-portrait): neutral, slightly lifted whites, so the person reads as flat
  *    colour on white paper.
@@ -15,10 +18,10 @@
  * Cost: 1 fetch per pixel.
  */
 import type { PassContext, StylePass } from '../../types/render';
-import { glsl, LUMA, SATURATE, type Uniforms } from './glsl';
+import { glsl, clamp, lookFactor, LUMA, SATURATE, type Uniforms } from './glsl';
 
 const FRAG = glsl`
-uniform float u_bands;      // number of luminance levels (5–6)
+uniform float u_bands;      // number of luminance levels (3–8, default 6)
 uniform float u_soft;       // half-width of the soft threshold in band units (0 = hard)
 uniform float u_saturation; // chroma multiplier around luminance
 uniform vec3  u_tint;       // per-channel multiplier (1,1,1 = clean)
@@ -52,10 +55,12 @@ void main() {
 `;
 
 function makeUniforms(variant: 'clean' | 'warm') {
-  return (_ctx: PassContext): Uniforms => ({
-    u_bands: 6,
+  return (ctx: PassContext): Uniforms => ({
+    // Whole bands only (the shader divides by it); 3..8 keeps both the cel look and the soft edge sane.
+    u_bands: clamp(Math.round(lookFactor(ctx.look, 'bands')), 3, 8),
     u_soft: 0.3, // softer band borders: a lighting gradient across a face no longer splits it with a hard seam
-    u_saturation: 1.25,
+    // Authored chroma boost × the look multiplier; 1 → 1.25 exactly.
+    u_saturation: 1.25 * lookFactor(ctx.look, 'saturation'),
     u_tint: variant === 'warm' ? [1.07, 1.0, 0.9] : [1.0, 1.0, 1.0],
     u_shadowLift: variant === 'warm' ? [0.08, 0.04, 0.02] : [0.0, 0.0, 0.0],
   });

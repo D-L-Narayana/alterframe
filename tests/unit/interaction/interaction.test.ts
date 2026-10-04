@@ -24,7 +24,8 @@ describe('createInteraction — hold / fade', () => {
     const out = ix.update(makeFrame([]), 0, scene, S);
     expect(out.quad).toBeNull();
     expect(out.events).toEqual([]);
-    expect(out.debug).toEqual({ armed: false, togetherMs: 0, handsUsed: 0 });
+    // `dwellProgress` is always reported (0 when the detector is off) so consumers never need a fallback.
+    expect(out.debug).toEqual({ armed: false, togetherMs: 0, handsUsed: 0, dwellProgress: 0 });
   });
 
   it('null frame is tolerated like an empty frame', () => {
@@ -235,15 +236,17 @@ describe('createInteraction — hands-together persona cycle', () => {
   });
 });
 
-describe('createInteraction — optional corner spring', () => {
-  it('with cornerSpring enabled the quad lags the target then converges within a few frames', () => {
+describe('createInteraction — corner spring', () => {
+  /** Same left hand with its index tip moved to x (the TL corner). */
+  const jumpLeft = (l: HandTrack, x: number): HandTrack => ({ ...l, indexTip: { x, y: l.indexTip.y } });
+
+  it('factory fallback: with cornerSpring enabled the quad lags the target then converges within a few frames', () => {
     const ix = createInteraction({ cornerSpring: { stiffness: 0.35 } });
     const [l, r] = lPoseHands();
     const first = ix.update(makeFrame([l, r]), 0, scene, S).quad!;
     // First frame snaps exactly (no history to lag from).
     expect(first.corners[0]).toEqual(l.indexTip);
-    const l2 = { ...l, indexTip: { x: 0.35, y: 0.30 } };
-    l2.landmarks = l.landmarks;
+    const l2 = jumpLeft(l, 0.35);
     let q = ix.update(makeFrame([l2, r]), 16, scene, S).quad!;
     expect(q.corners[0].x).toBeGreaterThan(0.25);
     expect(q.corners[0].x).toBeLessThan(0.35);
@@ -255,8 +258,109 @@ describe('createInteraction — optional corner spring', () => {
     const ix = createInteraction();
     const [l, r] = lPoseHands();
     ix.update(makeFrame([l, r]), 0, scene, S);
-    const l2 = { ...l, indexTip: { x: 0.35, y: 0.30 } };
-    const q = ix.update(makeFrame([l2, r]), 16, scene, S).quad!;
+    const q = ix.update(makeFrame([jumpLeft(l, 0.35), r]), 16, scene, S).quad!;
     expect(q.corners[0]).toEqual({ x: 0.35, y: 0.30 });
+  });
+
+  it('settings.cornerSpring > 0 enables the spring: first frame snaps, then lag, then convergence within a second at 60 Hz', () => {
+    const ix = createInteraction();
+    const on: InteractionSettings = { ...S, cornerSpring: 0.35 };
+    const [l, r] = lPoseHands();
+    const first = ix.update(makeFrame([l, r]), 0, scene, on).quad!;
+    expect(first.corners[0]).toEqual(l.indexTip);
+    const l2 = jumpLeft(l, 0.35);
+    let q = ix.update(makeFrame([l2, r]), 16, scene, on).quad!;
+    expect(q.corners[0].x).toBeGreaterThan(0.25);
+    expect(q.corners[0].x).toBeLessThan(0.35);
+    for (let t = 32; t <= 1000; t += 16) q = ix.update(makeFrame([l2, r]), t, scene, on).quad!;
+    expect(q.corners[0].x).toBeCloseTo(0.35, 4);
+  });
+
+  it('the setting wins over the factory fallback when it is non-zero', () => {
+    const ix = createInteraction({ cornerSpring: { stiffness: 0.05 } });
+    const snappy: InteractionSettings = { ...S, cornerSpring: 0.9 };
+    const [l, r] = lPoseHands();
+    ix.update(makeFrame([l, r]), 0, scene, snappy);
+    const q = ix.update(makeFrame([jumpLeft(l, 0.35), r]), 16, scene, snappy).quad!;
+    // Stiffness 0.9 closes ≈ 90 % of the 0.1 gap in one frame; the 0.05 fallback would reach only ≈ 0.255.
+    expect(q.corners[0].x).toBeGreaterThan(0.33);
+  });
+
+  it('stiffness 0 → exact tips on every frame while the target moves', () => {
+    const ix = createInteraction();
+    const [l, r] = lPoseHands();
+    for (let k = 0; k < 60; k++) {
+      const l2 = jumpLeft(l, 0.25 + k * 0.002);
+      const q = ix.update(makeFrame([l2, r]), k * 16, scene, S).quad!;
+      expect(q.corners).toEqual([l2.indexTip, r.indexTip, r.thumbTip, l2.thumbTip]);
+    }
+  });
+
+  it('changing the stiffness mid-stream keeps every corner finite and still converges', () => {
+    const ix = createInteraction();
+    const [l, r] = lPoseHands();
+    const ladder = [0.05, 0.9, 0.35, 0.2];
+    let q = ix.update(makeFrame([l, r]), 0, scene, { ...S, cornerSpring: 0.35 }).quad!;
+    for (let k = 1; k <= 120; k++) {
+      const l2 = jumpLeft(l, 0.25 + 0.1 * Math.sin(k / 7));
+      q = ix.update(makeFrame([l2, r]), k * 16, scene, { ...S, cornerSpring: ladder[k % 4]! }).quad!;
+      for (const c of q.corners) expect(Number.isFinite(c.x) && Number.isFinite(c.y)).toBe(true);
+    }
+    const l3 = jumpLeft(l, 0.3);
+    for (let t = 121 * 16; t < 121 * 16 + 1500; t += 16) q = ix.update(makeFrame([l3, r]), t, scene, { ...S, cornerSpring: 0.35 }).quad!;
+    expect(q.corners[0].x).toBeCloseTo(0.3, 4);
+  });
+
+  it('a stiffness change is retuned in place: the corner continues from its lagged position instead of snapping', () => {
+    const ix = createInteraction();
+    const [l, r] = lPoseHands();
+    ix.update(makeFrame([l, r]), 0, scene, { ...S, cornerSpring: 0.05 });
+    const l2 = jumpLeft(l, 0.45);
+    const a = ix.update(makeFrame([l2, r]), 16, scene, { ...S, cornerSpring: 0.05 }).quad!;
+    expect(a.corners[0].x).toBeLessThan(0.27); // ≈ 5 % of the 0.2 gap
+    const b = ix.update(makeFrame([l2, r]), 32, scene, { ...S, cornerSpring: 0.1 }).quad!;
+    expect(b.corners[0].x).toBeGreaterThan(a.corners[0].x);
+    expect(b.corners[0].x).toBeLessThan(0.3); // a recreated spring would have snapped to 0.45
+  });
+
+  it('stiffness set to 0 mid-stream snaps to the tips; re-enabling snaps on its first frame, then lags again', () => {
+    const ix = createInteraction();
+    const on: InteractionSettings = { ...S, cornerSpring: 0.35 };
+    const [l, r] = lPoseHands();
+    ix.update(makeFrame([l, r]), 0, scene, on);
+    const l2 = jumpLeft(l, 0.35);
+    expect(ix.update(makeFrame([l2, r]), 16, scene, on).quad!.corners[0].x).toBeLessThan(0.35);
+    expect(ix.update(makeFrame([l2, r]), 32, scene, S).quad!.corners[0]).toEqual(l2.indexTip);
+    const l3 = jumpLeft(l, 0.45);
+    expect(ix.update(makeFrame([l3, r]), 48, scene, on).quad!.corners[0]).toEqual(l3.indexTip);
+    const l4 = jumpLeft(l, 0.55);
+    const lag = ix.update(makeFrame([l4, r]), 64, scene, on).quad!;
+    expect(lag.corners[0].x).toBeGreaterThan(0.45);
+    expect(lag.corners[0].x).toBeLessThan(0.55);
+  });
+
+  it('the spring is reset when the pair is lost: hands returning elsewhere snap instead of gliding from the old spot', () => {
+    const ix = createInteraction();
+    const on: InteractionSettings = { ...S, cornerSpring: 0.35 };
+    const [l, r] = lPoseHands();
+    ix.update(makeFrame([l, r]), 0, scene, on);
+    ix.update(makeFrame([l, r]), 16, scene, on);
+    const held = ix.update(makeFrame([]), 32, scene, on).quad!;
+    expect(held.opacity).toBe(1);
+    expect(held.corners[0]).toEqual(l.indexTip);
+    const l2 = jumpLeft(l, 0.45);
+    expect(ix.update(makeFrame([l2, r]), 48, scene, on).quad!.corners[0]).toEqual(l2.indexTip);
+  });
+
+  it('default settings leave the v0.1 path untouched: corners equal the tips, no dwell events, dwellProgress 0', () => {
+    const ix = createInteraction();
+    const [l, r] = lPoseHands();
+    for (let k = 0; k < 120; k++) {
+      const l2 = jumpLeft(l, 0.25 + 0.05 * Math.sin(k / 9));
+      const out = ix.update(makeFrame([l2, r]), k * 16, scene, DEFAULT_INTERACTION_SETTINGS);
+      expect(out.quad!.corners).toEqual([l2.indexTip, r.indexTip, r.thumbTip, l2.thumbTip]);
+      expect(out.events.filter((e) => e.type === 'dwell')).toEqual([]);
+      expect(out.debug.dwellProgress).toBe(0);
+    }
   });
 });

@@ -2,7 +2,7 @@
  * `backdrop` — background replacement + cel shading for the masked / suit personas.
  *
  * Where the segmentation mask says background (mask < 0.5, feathered over `u_feather`
- * ≈ 8 px) the pixel is replaced by `u_backdrop` (W6's night city / warm paper). The person
+ * ≈ 8 px) the pixel is replaced by `u_backdrop` (the persona layer's night city / warm paper). The person
  * keeps the quantised comic colour and receives a two-tone cel shade: pixels in the
  * darker luminance half are multiplied by `u_shadowTint` (a cool, slightly desaturating
  * multiplier) so flat regions get the "lit side / shadow side" look of the reference

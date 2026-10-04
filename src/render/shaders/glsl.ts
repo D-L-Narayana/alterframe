@@ -1,18 +1,22 @@
 /**
- * Shared GLSL ES 3.00 building blocks for the stylization passes (W5).
+ * Shared GLSL ES 3.00 building blocks for the stylization passes.
  *
- * Every pass body is a string that the core (W4) prepends with the prelude described in
- * `src/types/render.ts`. The bodies here therefore never declare `#version`, precision,
- * `v_uv`, `fragColor` or the shared samplers/uniforms — only pass-specific uniforms,
- * helper functions and `main()`.
+ * Every pass body is a string that the core (`src/render/core`) prepends with the prelude
+ * described in `src/types/render.ts`. The bodies here therefore never declare `#version`,
+ * precision, `v_uv`, `fragColor` or the shared samplers/uniforms — only pass-specific
+ * uniforms, helper functions and `main()`.
  *
  * Orientation: all passes are written to be orientation-agnostic (no logic depends on
  * whether v_uv.y = 0 is the top or bottom row), so they work regardless of how the core
  * lays out its ping-pong framebuffers. Screen-space patterns (halftone, grain) only need
  * pixel coordinates, which they derive from `v_uv * u_resolution`.
+ *
+ * Look tuning: the user-facing `LookSettings` are multipliers around the authored constants
+ * (see `lookFactor`); with `DEFAULT_LOOK` every pass hands the core exactly the original
+ * values, so the default render is bit-identical to the untuned one.
  */
 
-import type { PassContext, UniformValue } from '../../types/render';
+import { DEFAULT_LOOK, type LookSettings, type PassContext, type UniformValue } from '../../types/render';
 
 /** Identity template tag; exists so editors can syntax-highlight GLSL and we can grep for shader code. */
 export const glsl = (strings: TemplateStringsArray, ...values: Array<string | number>): string =>
@@ -97,21 +101,34 @@ export function clamp(v: number, lo: number, hi: number): number {
 }
 
 /**
+ * One look multiplier, made safe for a uniform: a non-finite value (bad JSON, a slider
+ * mid-drag) falls back to the contract default instead of poisoning the frame with NaN, and
+ * negatives clamp to 0 — a negative line width, darkening cap, chroma gain or grain amplitude
+ * has no meaning. With `DEFAULT_LOOK` this returns the field unchanged (every default is a
+ * finite, non-negative number), which is what keeps the default render bit-identical.
+ */
+export function lookFactor(look: LookSettings, key: keyof LookSettings): number {
+  const v = look[key];
+  return Number.isFinite(v) ? Math.max(0, v) : DEFAULT_LOOK[key];
+}
+
+/**
  * "How many 720p-pixels is one texel of this pass". Pass kernels are authored at 720p
  * output and scaled by this so the look is resolution independent.
  *
- * The core (W4 `PassRunner.run`) calls `uniforms()` with `ctx.width/height` set to the
- * PASS output size (already multiplied by `pass.scale`). A pass with `scale: 0.5` therefore
- * sees 360 at 720p output; passing its own `passScale` normalises that back to 1.
+ * The core's pass runner calls `uniforms()` with `ctx.width/height` set to the PASS output
+ * size (already multiplied by `pass.scale`). A pass with `scale: 0.5` therefore sees 360 at
+ * 720p output; passing its own `passScale` normalises that back to 1.
  */
 export function pxScale(ctx: PassContext, passScale = 1): number {
   return clamp(ctx.height / (720 * passScale), 0.25, 4);
 }
 
 /**
- * Ink line thickness in *pass texels*: 2 px at 720p, clamped to the contract's
- * 1.5–2.5 display-px range, then expressed in the pass' own texels (renderScale < 1
- * means fewer texels cover the same display width, so the texel width shrinks).
+ * Authored ink line thickness in *pass texels*: 2 px at 720p, clamped to the 1.5–2.5
+ * display-px range, then expressed in the pass' own texels (renderScale < 1 means fewer
+ * texels cover the same display width, so the texel width shrinks). The look's `inkWidth`
+ * multiplies this in `ink.ts`, after the clamp.
  */
 export function inkWidthTexels(ctx: PassContext): number {
   const displayPx = clamp(2.0 * (ctx.height / ctx.quality.renderScale) / 720, 1.5, 2.5);

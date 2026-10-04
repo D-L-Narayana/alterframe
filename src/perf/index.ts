@@ -1,4 +1,4 @@
 export { createPerfMonitor } from './monitor';
 export type { PerfMonitor, PerfMonitorOptions } from './monitor';
-export { createAdaptivePolicy, defaultAdaptivePolicy, stepDown, stepUp, median } from './adaptive';
-export type { AdaptivePolicyOptions } from './adaptive';
+export { createAdaptivePolicy, defaultAdaptivePolicy, qualityLadder, stepDown, stepDownRenderScale, stepUp, median } from './adaptive';
+export type { AdaptivePolicyOptions, QualityField, QualityRung } from './adaptive';

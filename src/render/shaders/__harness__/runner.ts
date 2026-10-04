@@ -1,8 +1,8 @@
 /**
- * Standalone WebGL2 pass runner for the W5 harness. Implements exactly the StylePass
+ * Standalone WebGL2 pass runner for the shader harness. Implements exactly the StylePass
  * contract from src/types/render.ts (prelude, samplers, u_resolution/u_texel/u_time,
  * ping-pong FBOs sized by `pass.scale`) so the shaders can be compiled and pixel-tested
- * before W4's core lands. Never imported by the app.
+ * independently of the app's compositor (`src/render/core`). Never imported by the app.
  *
  * Orientation convention used here: textures are uploaded without UNPACK_FLIP_Y, so
  * texture row 0 (t = 0) is the top of the image and `v_uv.y = 0` is display-top in every
@@ -60,7 +60,7 @@ export class PassRunner {
     this.timerExt = gl.getExtension('EXT_disjoint_timer_query_webgl2') as PassRunner['timerExt'];
   }
 
-  /** Compile a pass with the contract prelude; returns {ok, log} like W4's compilePass. */
+  /** Compile a pass with the contract prelude; returns {ok, log} like the core's compilePass. */
   compilePass(pass: StylePass): CompileResult {
     const gl = this.gl;
     const sh = gl.createShader(gl.FRAGMENT_SHADER);
@@ -115,7 +115,7 @@ export class PassRunner {
       gl.uniform2f(gl.getUniformLocation(prog, 'u_resolution'), w, h);
       gl.uniform2f(gl.getUniformLocation(prog, 'u_texel'), 1 / w, 1 / h);
       gl.uniform1f(gl.getUniformLocation(prog, 'u_time'), ctx.time);
-      // Same semantics as W4's PassRunner: uniforms() sees the pass output size.
+      // Same semantics as the core's pass runner: uniforms() sees the pass output size (and ctx.look).
       const extra = pass.uniforms ? pass.uniforms({ ...ctx, width: w, height: h }) : {};
       for (const [name, value] of Object.entries(extra)) this.setUniform(prog, name, value);
       gl.drawArrays(gl.TRIANGLES, 0, 3);

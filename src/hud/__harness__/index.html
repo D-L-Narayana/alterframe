@@ -3,12 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>W8 HUD harness — AlterFrame</title>
+    <title>HUD harness — AlterFrame</title>
     <style>
       :root { color-scheme: dark; }
       body { margin: 0; background: #0b0b0d; color: #f2f2f4; font: 14px/1.4 Inter, system-ui, sans-serif; }
       header { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,.08); }
       header label { display: inline-flex; gap: 6px; align-items: center; }
+      header input[type="number"] { width: 4em; }
       main { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 16px; padding: 16px; }
       figure { margin: 0; }
       figcaption { color: #9a9aa3; margin: 6px 0 0; font-size: 12px; }
@@ -18,7 +19,7 @@
   </head>
   <body>
     <header>
-      <strong>W8 HUD harness</strong>
+      <strong>HUD harness</strong>
       <label><input type="checkbox" id="animate" checked /> animate (t)</label>
       <label><input type="checkbox" id="reduced" /> reduced motion</label>
       <label><input type="checkbox" id="recording" checked /> recording</label>
@@ -26,6 +27,10 @@
       <label><input type="checkbox" id="debug" /> debug landmarks</label>
       <label>opacity <input type="range" id="opacity" min="0" max="1" step="0.01" value="1" /></label>
       <label>font <select id="font"><option value="">Inter stack (default)</option><option value="system-ui, sans-serif">system-ui fallback</option><option value="serif">serif (worst case)</option></select></label>
+      <label>countdown <select id="countdown"><option value="">off</option><option value="record" selected>record</option><option value="snapshot">snapshot</option></select></label>
+      <label>seconds left <input type="number" id="seconds" min="0" max="10" step="1" value="3" /></label>
+      <label>countdown progress <input type="range" id="cdProgress" min="0" max="1" step="0.01" value="0.35" /></label>
+      <label>dwell progress <input type="range" id="dwell" min="0" max="1" step="0.01" value="0.6" /></label>
       <span id="status"></span>
     </header>
     <main id="root"></main>

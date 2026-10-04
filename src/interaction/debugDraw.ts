@@ -133,7 +133,10 @@ export function drawLandmarks(ctx: DebugCanvas2D, frame: TrackingFrame | null, s
       lines.push(`quad ${quad.ordering} area=${quad.area.toFixed(4)} thick=${quad.thickness.toFixed(3)} op=${quad.opacity.toFixed(2)}`);
     }
     if (extras.debug) {
-      lines.push(`hands=${extras.debug.handsUsed} together=${Math.round(extras.debug.togetherMs)}ms armed=${extras.debug.armed}`);
+      let line = `hands=${extras.debug.handsUsed} together=${Math.round(extras.debug.togetherMs)}ms armed=${extras.debug.armed}`;
+      const dwell = extras.debug.dwellProgress;
+      if (typeof dwell === 'number') line += ` dwell=${Math.round((Number.isFinite(dwell) ? dwell : 0) * 100)}%`;
+      lines.push(line);
     }
     const lineH = 14 * scale;
     lines.forEach((text, i) => ctx.fillText(text, 8 * scale, H - 8 * scale - (lines.length - 1 - i) * lineH));

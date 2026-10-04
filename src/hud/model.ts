@@ -1,8 +1,8 @@
-import type { HudCallout, HudModel, SceneState, TrackingFrame, Vec2, WindowQuad } from '@/types';
+import type { HudBox, HudCallout, HudCountdown, HudExtras, HudModel, SceneState, TrackingFrame, Vec2, WindowQuad } from '@/types';
 import { FACE_LM } from '@/types';
 import { buildCode, codePrefix } from './code';
 
-/** Third label (second eye) only appears when the window is large, as in the reference. */
+/** Third label (second eye) only appears when the window is large, as in the source footage. */
 export const EYE_RIGHT_MIN_AREA = 0.06;
 /** Mouth box appears when the mouth is clearly open. */
 export const MOUTH_OPEN_BOX_THRESHOLD = 0.35;
@@ -11,24 +11,31 @@ export const MOUTH_BOX_WIDTH_FACTOR = 1.6;
 /** Minimum box height relative to its width (keeps the rectangle visible for a thin smile). */
 const MOUTH_BOX_MIN_ASPECT = 0.25;
 
-/** Thin rectangle (normalized), centred at `center`. */
-export interface HudBox { center: Vec2; w: number; h: number }
+/** The box shape now lives on the contract; re-exported for callers that imported it from here. */
+export type { HudBox };
 
 /**
- * Superset of the contract `HudModel`. Extra fields are read by W8's own `draw`:
+ * Superset of the contract `HudModel` produced by `buildHudModel`. The optional
+ * contract fields are always present here (empty / null when unused), and two
+ * extra fields are read by this module's own `draw`:
  *  - `t`: build time (ms) → blink phase for the record dot (keeps draw pure).
- *  - `boxes`: free-standing thin rectangles (mouth box). `HudCallout.id` has no
- *    'mouth' member, so the box lives here rather than on a mis-labelled callout.
  *  - `debugFrame`: the tracking frame, so the debug landmark overlay can be drawn
  *    after the HUD without the runtime passing it twice.
  */
 export interface HudModelExt extends HudModel {
   t: number;
+  /** Free-standing thin rectangles (the mouth box). */
   boxes: HudBox[];
+  countdown: HudCountdown | null;
+  dwellProgress: number | null;
   debugFrame: TrackingFrame | null;
 }
 
-export interface BuildExtras { recording: boolean; fps: number | null; showFps: boolean }
+/** Per-frame extras — alias of the contract `HudExtras`, kept for existing imports. */
+export type BuildExtras = HudExtras;
+
+/** True for models produced by `buildHudModel` (they carry `t` and `debugFrame`). */
+export const isHudModelExt = (m: HudModel): m is HudModelExt => 't' in m && 'debugFrame' in m;
 
 const isFinitePoint = (p: Vec2 | undefined | null): p is Vec2 =>
   !!p && Number.isFinite(p.x) && Number.isFinite(p.y);
@@ -50,25 +57,30 @@ function mouthBox(frame: TrackingFrame | null): HudBox | null {
 }
 
 /**
- * Pure model builder (contract W8 §1). Callouts are emitted in draw order:
+ * Pure model builder. Callouts are emitted in draw order:
  * corner → eye-left (leader from corner) → eye-right (leader from eye-left, large windows only).
+ * `countdown` and `dwellProgress` pass straight through from the extras (missing → null);
+ * the countdown is independent of the window, so it survives a null / hidden quad.
  */
 export function buildHudModel(
   frame: TrackingFrame | null,
   quad: WindowQuad | null,
   scene: SceneState,
   t: number,
-  extras: BuildExtras,
+  extras: HudExtras,
   seed = 0,
 ): HudModelExt {
+  const dwell = extras.dwellProgress;
   const base: HudModelExt = {
     tint: scene.hudTint,
     callouts: [],
     opacity: 0,
     recording: extras.recording,
     fps: extras.showFps && extras.fps !== null && Number.isFinite(extras.fps) ? extras.fps : null,
-    t,
     boxes: [],
+    countdown: extras.countdown ?? null,
+    dwellProgress: typeof dwell === 'number' && Number.isFinite(dwell) ? dwell : null,
+    t,
     debugFrame: frame,
   };
   if (!quad || !quad.visible) return base;

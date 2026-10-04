@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>W7 harness — window quad / gesture / director</title>
+    <title>W7 harness — window quad / gesture / dwell / director</title>
     <style>
       body { margin: 0; background: #0b0b0d; color: #f2f2f4; font: 14px/1.4 system-ui, sans-serif; }
       main { display: grid; grid-template-columns: 1fr 320px; gap: 12px; padding: 12px; }
@@ -11,6 +11,8 @@
       aside { display: grid; gap: 8px; align-content: start; }
       label { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
       select, button { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.15); background: #1c1c22; color: inherit; }
+      input[type=range] { flex: 1; }
+      output { min-width: 3.5em; text-align: right; color: #9a9aa3; font-variant-numeric: tabular-nums; }
       pre { margin: 0; white-space: pre-wrap; font-size: 12px; color: #9a9aa3; max-height: 40vh; overflow: auto; }
     </style>
   </head>
@@ -26,12 +28,24 @@
             <option value="slit">Closed fists slit</option>
             <option value="gesture">Together → open (persona cycle)</option>
             <option value="lost">Hand lost (hold/fade)</option>
+            <option value="dwell">Hold still 2 s → move (dwell)</option>
           </select>
         </label>
         <label>Ordering
           <select id="ordering"><option value="convex">convex</option><option value="faithful">faithful</option></select>
         </label>
-        <label>Corner spring <input id="spring" type="checkbox" /></label>
+        <label>Corner spring
+          <input id="spring" type="range" min="0" max="0.9" step="0.05" value="0" aria-label="Corner spring stiffness (0 = off)" />
+          <output id="springOut" for="spring">off</output>
+        </label>
+        <label>Hold still (dwellMs)
+          <select id="dwell">
+            <option value="0">off</option>
+            <option value="1000">1000 ms</option>
+            <option value="1500" selected>1500 ms</option>
+            <option value="2000">2000 ms</option>
+          </select>
+        </label>
         <label>Gesture cycle <input id="gesture" type="checkbox" checked /></label>
         <button id="director" type="button">Director: start</button>
         <pre id="log"></pre>

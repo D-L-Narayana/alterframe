@@ -171,12 +171,12 @@ function paintSky(ctx: Ctx2D, size: Size): void {
   ctx.fillRect(0, 0, w, h);
 }
 
-function paintStreaks(ctx: Ctx2D, size: Size, streaks: NeonStreak[]): void {
+function paintStreaks(ctx: Ctx2D, size: Size, streaks: NeonStreak[], offset = 0): void {
   const { width: w, height: h } = size;
   const M = PERSONA_PALETTE.masked;
   for (const st of streaks) {
     for (const k of [-1, 0, 1]) {               // tile so the layer wraps seamlessly
-      const x = (st.x + k) * w;
+      const x = (st.x + offset + k) * w;
       if (x < -w * 0.1 || x > w * 1.1) continue;
       const col = st.blue ? M.neonA : M.neonB;
       const y0 = st.top * h, y1 = st.bottom * h;
@@ -237,31 +237,65 @@ function blitWrapped(ctx: Ctx2D, layer: LayerCanvas, size: Size, offset: number)
 /** Uniform drift speed for the neon streak layer (between far and near so it reads as mid-distance). */
 const STREAK_SPEED = 0.0055;
 
+/** Head-parallax gain per city layer: normalized widths of extra offset per unit of (faceX − 0.5). */
+export const HEAD_PARALLAX = { near: 0.04, far: 0.02, streaks: 0.03 } as const;
+export type CityLayer = keyof typeof HEAD_PARALLAX;
+
+/**
+ * Extra horizontal offset (normalized widths) of a city layer for the head at normalized x `faceX`
+ * (face box centre): `(faceX − 0.5) × gain`, so the city slides against the head like a real window.
+ * 0 at the centre, when there is no face (null) and under reduced motion (frozen).
+ */
+export function cityParallaxOffset(faceX: number | null, layer: CityLayer, reducedMotion: boolean): number {
+  if (reducedMotion || faceX === null || !Number.isFinite(faceX)) return 0;
+  return (faceX - 0.5) * HEAD_PARALLAX[layer];
+}
+
+const layerSpeed = (layer: CityLayer): number => (layer === 'streaks' ? STREAK_SPEED : SKYLINE[layer].speed);
+
+/** Wrap into [0,1); the identity for values already in range (`o − 0`). */
+const wrap01 = (o: number): number => o - Math.floor(o);
+
+/**
+ * Total offset of a city layer: time drift (`parallaxOffset`) plus head parallax, wrapped into
+ * [0,1) so the two-blit seam cover keeps working for negative head offsets. With the head centred
+ * (or absent) this is exactly `parallaxOffset(tMs, speed, reducedMotion)`.
+ */
+export function cityLayerOffset(tMs: number, layer: CityLayer, reducedMotion: boolean, faceX: number | null): number {
+  return wrap01(parallaxOffset(tMs, layerSpeed(layer), reducedMotion) + cityParallaxOffset(faceX, layer, reducedMotion));
+}
+
 /**
  * Night city: navy sky → magenta horizon glow, two parallax skyline layers with lit windows,
  * vertical neon streaks (blue / magenta) with glow, and a dark reflective ground band.
  * Static layers are prerendered once per size; each tick is five drawImage blits (≈ sub-ms).
+ * `faceX` (normalized face-box centre x, null = no face) adds the head parallax (`cityParallaxOffset`);
+ * omitted or 0.5 it paints exactly the time-driven drift.
  */
-export function drawCityBackdrop(ctx: Ctx2D, size: Size, tMs: number, reducedMotion: boolean, seed = 5): void {
+export function drawCityBackdrop(ctx: Ctx2D, size: Size, tMs: number, reducedMotion: boolean, seed = 5, faceX: number | null = null): void {
   ctx.save();
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
+  const farOff = cityLayerOffset(tMs, 'far', reducedMotion, faceX);
+  const streakOff = cityLayerOffset(tMs, 'streaks', reducedMotion, faceX);
+  const nearOff = cityLayerOffset(tMs, 'near', reducedMotion, faceX);
   const layers = cityLayersFor(size, seed);
   if (layers) {
     ctx.drawImage(layers.sky as CanvasImageSource, 0, 0);
-    blitWrapped(ctx, layers.far, size, parallaxOffset(tMs, SKYLINE.far.speed, reducedMotion));
-    blitWrapped(ctx, layers.streaks, size, parallaxOffset(tMs, STREAK_SPEED, reducedMotion));
-    blitWrapped(ctx, layers.near, size, parallaxOffset(tMs, SKYLINE.near.speed, reducedMotion));
+    blitWrapped(ctx, layers.far, size, farOff);
+    blitWrapped(ctx, layers.streaks, size, streakOff);
+    blitWrapped(ctx, layers.near, size, nearOff);
     ctx.drawImage(layers.ground as CanvasImageSource, 0, 0);
   } else {
-    // No scratch canvases available (Node / exotic env): paint directly.
+    // No scratch canvases available (Node / exotic env): paint directly. The streaks keep their
+    // static position here (as before) and only follow the head.
     const M = PERSONA_PALETTE.masked;
     const s = skyline(seed);
     const horizon = size.height * 0.82;
     paintSky(ctx, size);
-    drawBuildingLayer(ctx, size, s.far, parallaxOffset(tMs, SKYLINE.far.speed, reducedMotion), horizon, ...FAR_STYLE(M));
-    paintStreaks(ctx, size, s.streaks);
-    drawBuildingLayer(ctx, size, s.near, parallaxOffset(tMs, SKYLINE.near.speed, reducedMotion), horizon, ...NEAR_STYLE(M));
+    drawBuildingLayer(ctx, size, s.far, farOff, horizon, ...FAR_STYLE(M));
+    paintStreaks(ctx, size, s.streaks, cityParallaxOffset(faceX, 'streaks', reducedMotion));
+    drawBuildingLayer(ctx, size, s.near, nearOff, horizon, ...NEAR_STYLE(M));
     paintGround(ctx, size);
   }
   ctx.restore();

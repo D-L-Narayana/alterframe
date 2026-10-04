@@ -13,3 +13,4 @@ tests/fixtures/*.y4m
 .env
 .env.*
 .probe-*
+*.log

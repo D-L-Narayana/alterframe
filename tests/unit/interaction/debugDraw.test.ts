@@ -78,6 +78,15 @@ describe('drawLandmarks', () => {
     expect(texts.join(' ')).toMatch(/convex/);
   });
 
+  it('prints the dwell progress as a percentage when it is supplied', () => {
+    const { ctx, texts } = fakeCtx();
+    drawLandmarks(ctx, null, size, { debug: { armed: false, togetherMs: 0, handsUsed: 2, dwellProgress: 0.5 } });
+    expect(texts.join(' ')).toMatch(/dwell=50%/);
+    const { ctx: ctx2, texts: texts2 } = fakeCtx();
+    drawLandmarks(ctx2, null, size, { debug: { armed: false, togetherMs: 0, handsUsed: 2 } });
+    expect(texts2.join(' ')).not.toMatch(/dwell/);
+  });
+
   it('never passes non-finite numbers to the canvas', () => {
     const { ctx, calls } = fakeCtx();
     const [l, r] = lPoseHands();

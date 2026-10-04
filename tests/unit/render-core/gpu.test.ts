@@ -1,7 +1,11 @@
 /**
- * Real-WebGL2 pixel tests for the W4 compositor. Boots a Vite dev server on port 6214, opens
+ * Real-WebGL2 pixel tests for the compositor. Boots a Vite dev server on port 6214, opens
  * src/render/core/__harness__/gpu-test.html in headless Chromium (SwiftShader) and asserts on
- * readPixels. Skips (with a reason) when Chromium cannot be launched in this environment.
+ * readPixels. Skips (with a reason) only when Chromium cannot be launched in this environment.
+ *
+ * Timeouts are generous on purpose: the first Vite transform of the harness module can take
+ * minutes on a cold, CPU-only sandbox. Run with
+ *   vitest run tests/unit/render-core/gpu.test.ts --hookTimeout 300000 --testTimeout 120000
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'node:url';
@@ -9,11 +13,19 @@ import path from 'node:path';
 import { createServer, type ViteDevServer } from 'vite';
 import { chromium, type Browser, type Page } from '@playwright/test';
 import type { SceneSpec, SceneResult, W4Harness } from '../../../src/render/core/__harness__/gpu-test';
+import { STYLE_PRESETS } from '../../../src/render/styles';
 
 const PORT = 6214;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const HARNESS_PATH = '/src/render/core/__harness__/gpu-test.html';
 let URL = `http://127.0.0.1:${PORT}${HARNESS_PATH}`;
+
+/** Whole-suite boot budget (server + browser + first transform). */
+const BOOT_TIMEOUT_MS = 240_000;
+/** Harness page readiness (includes the first Vite transform of the harness + core modules). */
+const HARNESS_READY_MS = 180_000;
+/** Per-test budget; SwiftShader frames are milliseconds, shader compiles tens of ms. */
+const TEST_TIMEOUT_MS = 60_000;
 
 let server: ViteDevServer | null = null;
 let browser: Browser | null = null;
@@ -32,6 +44,8 @@ const GREEN: [number, number, number] = [0, 255, 0];
 const BLUE: [number, number, number] = [0, 0, 255];
 const WHITE: [number, number, number] = [255, 255, 255];
 const YELLOW: [number, number, number] = [255, 255, 0];
+const BLACK: [number, number, number] = [0, 0, 0];
+const MAGENTA: [number, number, number] = [255, 0, 255];
 
 async function run(spec: SceneSpec): Promise<SceneResult> {
   return page!.evaluate((s) => (window as Window & { __w4?: W4Harness }).__w4!.run(s), spec);
@@ -39,7 +53,7 @@ async function run(spec: SceneSpec): Promise<SceneResult> {
 
 beforeAll(async () => {
   try {
-    // Reuse a dev server already serving this root on 6214 (W4's own port), else start one on 6214..6219.
+    // Reuse a dev server already serving this root on 6214, else start one on 6214..6219.
     const existing = await fetch(URL).then((r) => r.ok).catch(() => false);
     if (!existing) {
       let lastErr: unknown = null;
@@ -67,23 +81,23 @@ beforeAll(async () => {
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
     page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-    await page.goto(URL);
-    await page.waitForFunction(() => (window as Window & { __w4?: W4Harness }).__w4?.ready === true, undefined, { timeout: 30_000 });
+    await page.goto(URL, { timeout: HARNESS_READY_MS });
+    await page.waitForFunction(() => (window as Window & { __w4?: W4Harness }).__w4?.ready === true, undefined, { timeout: HARNESS_READY_MS });
     const err = await page.evaluate(() => (window as Window & { __w4?: W4Harness }).__w4?.error ?? null);
     if (err) skipReason = `harness failed: ${err}`;
     if (errors.length) skipReason = `page errors: ${errors.join(' | ')}`;
   } catch (e) {
     skipReason = `cannot boot GPU harness: ${(e as Error).message}`;
   }
-}, 90_000);
+}, BOOT_TIMEOUT_MS);
 
 afterAll(async () => {
   await browser?.close();
   await server?.close();
 });
 
-describe('W4 compositor on a real WebGL2 context', () => {
-  const gpuIt = (name: string, fn: () => Promise<void>, timeout = 30_000) =>
+describe('compositor on a real WebGL2 context', () => {
+  const gpuIt = (name: string, fn: () => Promise<void>, timeout = TEST_TIMEOUT_MS) =>
     it(name, async (ctx) => {
       if (skipReason) {
         ctx.skip(skipReason);
@@ -99,6 +113,7 @@ describe('W4 compositor on a real WebGL2 context', () => {
     near(r.probes[0], RED);
     expect(r.stats.passes).toBeGreaterThan(0);
     expect(r.stats.lastFrameMs).toBeGreaterThanOrEqual(0);
+    expect(r.glError).toBe(0);
     const hi = await run({ css: { w: 320, h: 180, dpr: 2 }, base: { solid: [1, 0, 0] } });
     expect(hi.backing).toEqual({ w: 640, h: 360 });
   });
@@ -184,7 +199,7 @@ describe('W4 compositor on a real WebGL2 context', () => {
 
   gpuIt('overlay, HUD and mask share display space with the mirrored video (no double mirror, no flip)', async () => {
     // Video has a dark dot at SOURCE (0.75, 0.3); mirrored it appears at DISPLAY (0.25, 0.3).
-    // W6 overlay draws a white dot at DISPLAY (0.25, 0.3) (already mirrored) -> it must cover the video dot.
+    // The persona overlay draws a white dot at DISPLAY (0.25, 0.3) (already mirrored) -> it must cover the video dot.
     const dot = { x: 0.75, y: 0.3, r: 0.06, color: '#101010' };
     const r = await run({
       video: { w: 640, h: 360, pattern: 'dot', color: '#808080', dot }, mirrored: true,
@@ -198,7 +213,7 @@ describe('W4 compositor on a real WebGL2 context', () => {
     near(r.probes[1], [16, 16, 16]); // ring of the video dot still visible just outside the overlay dot
     near(r.probes[2], [128, 128, 128]); // background
     near(r.probes[3], [128, 128, 128]); // NOT the video dot: it was mirrored to the left
-    near(r.probes[4], [255, 0, 255]); // HUD dot at display (0.75, 0.7)
+    near(r.probes[4], MAGENTA); // HUD dot at display (0.75, 0.7)
     // Without a window, the overlay must NOT show (inside-window only) but the HUD still does.
     const noWin = await run({
       video: { w: 640, h: 360, pattern: 'solid', color: '#808080' }, base: 'live', quad: null,
@@ -207,7 +222,7 @@ describe('W4 compositor on a real WebGL2 context', () => {
       probes: [{ x: 0.25, y: 0.3 }, { x: 0.75, y: 0.7 }],
     });
     near(noWin.probes[0], [128, 128, 128]);
-    near(noWin.probes[1], [255, 0, 255]);
+    near(noWin.probes[1], MAGENTA);
   });
 
   gpuIt('segmentation mask: top-left origin, already mirrored, sampled via u_mask.r in both formats', async () => {
@@ -233,7 +248,7 @@ describe('W4 compositor on a real WebGL2 context', () => {
     near(none.probes[0], GREEN, 2);
   });
 
-  gpuIt('u_backdrop is the W6 backdrop canvas in display space', async () => {
+  gpuIt('u_backdrop is the persona backdrop canvas in display space', async () => {
     const r = await run({
       base: { solid: [0, 0, 0] }, window: { frag: 'void main(){ fragColor = texture(u_backdrop, v_uv); }' },
       backdrop: { fill: '#ff8000', dots: [{ x: 0.3, y: 0.6, r: 0.05, color: '#00ffff' }] },
@@ -278,6 +293,7 @@ describe('W4 compositor on a real WebGL2 context', () => {
       probesPx: [{ x: 2, y: 2 }, { x: 357, y: 357 }],
     });
     expect(square.backing).toEqual({ w: 360, h: 360 });
+    expect(square.fit.mode).toBe('cover');
     expect(square.fit.uvScale[0]).toBeCloseTo(0.5625, 4);
     expect(square.fit.uvScale[1]).toBeCloseTo(1, 4);
     near(square.probes[0], RED);
@@ -293,6 +309,7 @@ describe('W4 compositor on a real WebGL2 context', () => {
       probes: [{ x: 0.4, y: 0.25 }, { x: 0.6, y: 0.75 }], probesPx: [{ x: 2, y: 2 }, { x: 357, y: 637 }],
     });
     expect(portrait.backing).toEqual({ w: 360, h: 640 });
+    expect(portrait.fit.mode).toBe('cover');
     near(portrait.probes[0], RED);
     near(portrait.probes[1], WHITE);
     near(portrait.probesPx[0], RED);
@@ -301,6 +318,133 @@ describe('W4 compositor on a real WebGL2 context', () => {
     expect(wide.fit.uvScale[1]).toBeCloseTo((640 / 200) ** -1 * (640 / 360), 4);
     near(wide.probesPx[0], RED);
     near(wide.probesPx[1], WHITE);
+  });
+
+  gpuIt("fitMode omitted or 'cover' give identical pixels (default path unchanged)", async () => {
+    const scene: SceneSpec = {
+      css: { w: 360, h: 360, dpr: 1 }, video: { w: 640, h: 360, pattern: 'quadrants' }, base: 'live', window: { solid: [0, 0, 1] },
+      quad: [{ x: 0.4, y: 0.2 }, { x: 0.6, y: 0.2 }, { x: 0.6, y: 0.8 }, { x: 0.4, y: 0.8 }],
+      hud: { dots: [{ x: 0.75, y: 0.7, r: 0.03, color: '#ff00ff' }] },
+      probes: [{ x: 0.3, y: 0.25 }, { x: 0.7, y: 0.75 }, { x: 0.5, y: 0.5 }, { x: 0.75, y: 0.7 }],
+      probesPx: [{ x: 2, y: 2 }, { x: 357, y: 357 }, { x: 170, y: 40 }, { x: 170, y: 320 }],
+    };
+    const implicit = await run(scene);
+    const explicit = await run({ ...scene, fitMode: 'cover' });
+    expect(implicit.fit).toEqual(explicit.fit);
+    expect(implicit.fit.mode).toBe('cover');
+    expect(implicit.probes).toEqual(explicit.probes);
+    expect(implicit.probesPx).toEqual(explicit.probesPx);
+    near(implicit.probesPx[2], RED); // cover: no bars, the top strip shows cropped video (display x 0.485, above the quad)
+    near(implicit.probesPx[3], BLUE); // bottom strip: BL quadrant below the quad
+    expect(implicit.glError).toBe(0);
+  });
+
+  gpuIt('contain-fit present @ css 360×360: black bars top/bottom, content centred, quad and HUD aligned through the same mapping', async () => {
+    const quadrants = { w: 640, h: 360, pattern: 'quadrants' as const };
+    const r = await run({
+      css: { w: 360, h: 360, dpr: 1 }, fitMode: 'contain', video: quadrants, base: 'live', window: { solid: [0, 0, 1] },
+      quad: [{ x: 0.4, y: 0.2 }, { x: 0.6, y: 0.2 }, { x: 0.6, y: 0.8 }, { x: 0.4, y: 0.8 }],
+      hud: { dots: [{ x: 0.75, y: 0.7, r: 0.03, color: '#ff00ff' }] },
+      probes: [{ x: 0.25, y: 0.25 }, { x: 0.75, y: 0.25 }, { x: 0.25, y: 0.75 }, { x: 0.75, y: 0.75 }, { x: 0.5, y: 0.5 }, { x: 0.3, y: 0.25 }, { x: 0.75, y: 0.7 }, { x: 0.75, y: 0.76 }],
+      probesPx: [
+        { x: 2, y: 2 }, { x: 357, y: 2 }, { x: 2, y: 357 }, { x: 357, y: 357 }, // canvas corners: bars
+        { x: 180, y: 40 }, { x: 180, y: 320 }, // bar centres
+        { x: 90, y: 76 }, { x: 90, y: 82 }, { x: 90, y: 278 }, { x: 90, y: 284 }, // bar/content edges (78.75 and 281.25)
+        { x: 170, y: 116 }, { x: 170, y: 123 }, // quad top edge (display y 0.2 -> canvas y 119.25)
+        { x: 180, y: 180 }, // canvas centre == display centre (inside the quad)
+      ],
+    });
+    expect(r.backing).toEqual({ w: 360, h: 360 });
+    expect(r.fit.mode).toBe('contain');
+    expect(r.fit.uvScale[0]).toBeCloseTo(1, 4);
+    expect(r.fit.uvScale[1]).toBeCloseTo(16 / 9, 4);
+    expect(r.fit.uvOffset[0]).toBeCloseTo(0, 4);
+    expect(r.fit.uvOffset[1]).toBeCloseTo((1 - 16 / 9) / 2, 4);
+    // Whole frame visible, upright, not mirrored.
+    near(r.probes[0], RED); near(r.probes[1], GREEN); near(r.probes[2], BLUE); near(r.probes[3], WHITE);
+    near(r.probes[4], BLUE); // quad centre
+    near(r.probes[5], RED); // outside the quad
+    near(r.probes[6], MAGENTA); // HUD dot through the same mapping
+    near(r.probes[7], WHITE); // just outside the HUD dot: BR quadrant
+    // Bars are opaque black.
+    for (let i = 0; i < 6; i++) near(r.probesPx[i], BLACK, 2);
+    // Content band is centred: symmetric bar edges at 78.75 and 281.25.
+    near(r.probesPx[6], BLACK, 2);
+    near(r.probesPx[7], RED);
+    near(r.probesPx[8], BLUE);
+    near(r.probesPx[9], BLACK, 2);
+    // Quad edge sits where the same mapping puts display y = 0.2.
+    near(r.probesPx[10], RED);
+    near(r.probesPx[11], BLUE);
+    near(r.probesPx[12], BLUE);
+    // Probe positions computed with the pure helper match the compositor's mapping.
+    expect(r.probePx[4]!.x).toBeCloseTo(180, 0);
+    expect(r.probePx[4]!.y).toBeCloseTo(180, 0);
+    expect(r.probePx[0]!.y).toBeCloseTo(129.4, 0);
+    expect(r.glError).toBe(0);
+    // The HUD is never drawn on the bars, even when it covers its whole canvas.
+    const hudFill = await run({
+      css: { w: 360, h: 360, dpr: 1 }, fitMode: 'contain', video: quadrants, base: 'live', hud: { fill: '#ff00ff' },
+      probes: [{ x: 0.5, y: 0.5 }, { x: 0.02, y: 0.02 }, { x: 0.98, y: 0.98 }],
+      probesPx: [{ x: 2, y: 2 }, { x: 357, y: 2 }, { x: 2, y: 357 }, { x: 357, y: 357 }, { x: 180, y: 40 }, { x: 180, y: 320 }],
+    });
+    for (const p of hudFill.probes) near(p, MAGENTA);
+    for (const p of hudFill.probesPx) near(p, BLACK, 2);
+  });
+
+  gpuIt('contain-fit present @ css 180×320 dpr 2: deep letterbox, centred content, quad aligned, no HUD on bars', async () => {
+    const quadrants = { w: 640, h: 360, pattern: 'quadrants' as const };
+    const r = await run({
+      css: { w: 180, h: 320, dpr: 2 }, fitMode: 'contain', video: quadrants, base: 'live', window: { solid: [0, 0, 1] },
+      quad: [{ x: 0.4, y: 0.2 }, { x: 0.6, y: 0.2 }, { x: 0.6, y: 0.8 }, { x: 0.4, y: 0.8 }],
+      hud: { dots: [{ x: 0.75, y: 0.7, r: 0.03, color: '#ff00ff' }] },
+      probes: [{ x: 0.25, y: 0.25 }, { x: 0.75, y: 0.75 }, { x: 0.5, y: 0.5 }, { x: 0.3, y: 0.25 }, { x: 0.7, y: 0.75 }, { x: 0.75, y: 0.7 }],
+      probesPx: [
+        { x: 2, y: 2 }, { x: 357, y: 2 }, { x: 2, y: 637 }, { x: 357, y: 637 }, // corners: bars
+        { x: 180, y: 100 }, { x: 180, y: 540 }, // bar centres
+        { x: 90, y: 216 }, { x: 90, y: 222 }, { x: 90, y: 418 }, { x: 90, y: 424 }, // bar/content edges (218.75 and 421.25)
+        { x: 170, y: 255 }, { x: 170, y: 263 }, // quad top edge (display y 0.2 -> canvas y 259.25)
+        { x: 180, y: 320 }, // canvas centre == display centre
+      ],
+    });
+    expect(r.backing).toEqual({ w: 360, h: 640 });
+    expect(r.fit.mode).toBe('contain');
+    expect(r.fit.uvScale[0]).toBeCloseTo(1, 4);
+    expect(r.fit.uvScale[1]).toBeCloseTo((640 / 360) / (360 / 640), 4);
+    expect(r.fit.uvOffset[1]).toBeCloseTo((1 - r.fit.uvScale[1]) / 2, 4);
+    near(r.probes[0], RED);
+    near(r.probes[1], WHITE);
+    near(r.probes[2], BLUE); // quad centre
+    near(r.probes[3], RED);
+    near(r.probes[4], WHITE);
+    near(r.probes[5], MAGENTA); // HUD dot
+    for (let i = 0; i < 6; i++) near(r.probesPx[i], BLACK, 2);
+    near(r.probesPx[6], BLACK, 2);
+    near(r.probesPx[7], RED);
+    near(r.probesPx[8], BLUE);
+    near(r.probesPx[9], BLACK, 2);
+    near(r.probesPx[10], RED);
+    near(r.probesPx[11], BLUE);
+    near(r.probesPx[12], BLUE);
+    expect(r.probePx[2]!.x).toBeCloseTo(180, 0);
+    expect(r.probePx[2]!.y).toBeCloseTo(320, 0);
+    expect(r.glError).toBe(0);
+    // Pillarbox the other way round: a 4:3 video into the 16:9 default canvas puts bars left/right.
+    const pillar = await run({
+      css: { w: 640, h: 360, dpr: 1 }, fitMode: 'contain', video: { w: 480, h: 360, pattern: 'quadrants' }, base: 'live',
+      probes: [{ x: 0.25, y: 0.25 }, { x: 0.75, y: 0.75 }],
+      probesPx: [{ x: 2, y: 180 }, { x: 637, y: 180 }, { x: 76, y: 90 }, { x: 84, y: 90 }, { x: 300, y: 2 }, { x: 300, y: 357 }],
+    });
+    expect(pillar.fit.uvScale[0]).toBeCloseTo((640 / 360) / (480 / 360), 4);
+    expect(pillar.fit.uvOffset[0]).toBeLessThan(0);
+    near(pillar.probes[0], RED);
+    near(pillar.probes[1], WHITE);
+    near(pillar.probesPx[0], BLACK, 2);
+    near(pillar.probesPx[1], BLACK, 2);
+    near(pillar.probesPx[2], BLACK, 2); // bar edge at x = 80
+    near(pillar.probesPx[3], RED);
+    near(pillar.probesPx[4], RED); // no bars top/bottom (display x 0.46: TL above, BL below)
+    near(pillar.probesPx[5], BLUE);
   });
 
   gpuIt('glitch displaces window content only inside the quad and only when glitch > 0', async () => {
@@ -347,6 +491,69 @@ describe('W4 compositor on a real WebGL2 context', () => {
     expect(absent.uploads.overlay).toBe(uploadsAfterFirst + 2);
   });
 
+  gpuIt('warm(): compiles every STYLE_PRESETS pass in idle chunks without GL errors, idempotently, and leaves pixels unchanged', async () => {
+    const presets = Object.values(STYLE_PRESETS);
+    // Programs are cached by fragment source: passes that differ only in uniforms share one program.
+    const expectedDistinct = new Set(presets.flatMap((p) => p.passes.map((pass) => pass.frag))).size;
+    expect(expectedDistinct).toBeGreaterThan(0);
+    expect(expectedDistinct).toBeLessThanOrEqual(presets.flatMap((p) => p.passes).length);
+    const scene: SceneSpec = {
+      video: { w: 640, h: 360, pattern: 'quadrants' }, base: 'live', window: { solid: [0, 0, 1] },
+      quad: [{ x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 }, { x: 0.7, y: 0.7 }, { x: 0.3, y: 0.7 }],
+      hud: { dots: [{ x: 0.75, y: 0.7, r: 0.03, color: '#ff00ff' }] },
+      probes: [{ x: 0.5, y: 0.5 }, { x: 0.1, y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.75, y: 0.7 }],
+    };
+    const before = await run(scene);
+    const warm = await page!.evaluate(() => (window as Window & { __w4?: W4Harness }).__w4!.warmAll());
+    expect(warm.distinctPasses).toBe(expectedDistinct);
+    expect(warm.warmBefore).toBe(false);
+    // Chunked over idle callbacks in the browser: the call returns before the work is done ...
+    expect(warm.pendingAfterCall).toBe(presets.length);
+    // ... and every pass program exists once the queue drained.
+    expect(warm.allWarm).toBe(true);
+    expect(warm.programsAfter).toBe(warm.programsBefore + expectedDistinct);
+    expect(warm.glError).toBe(0);
+    // Idempotent: warming again compiles nothing new.
+    const again = await page!.evaluate(() => (window as Window & { __w4?: W4Harness }).__w4!.warmAll());
+    expect(again.warmBefore).toBe(true);
+    expect(again.allWarm).toBe(true);
+    expect(again.programsAfter).toBe(warm.programsAfter);
+    expect(again.glError).toBe(0);
+    // Pixels are unchanged by the warm-up.
+    const after = await run(scene);
+    expect(after.probes).toEqual(before.probes);
+    expect(after.programs).toBe(warm.programsAfter);
+    // Rendering the real presets now hits the warmed programs: no new compiles, no GL errors.
+    const comic = await run({ ...scene, window: { preset: 'comic' }, base: { preset: 'comic' }, probes: [{ x: 0.5, y: 0.5 }] });
+    expect(comic.programs).toBe(warm.programsAfter);
+    expect(comic.glError).toBe(0);
+    expect(comic.stats.passes).toBeGreaterThan(presets[0]!.passes.length);
+    const paper = await run({ ...scene, window: { preset: 'paper-portrait' }, probes: [{ x: 0.5, y: 0.5 }] });
+    expect(paper.programs).toBe(warm.programsAfter);
+    expect(paper.glError).toBe(0);
+  }, 120_000);
+
+  gpuIt('stats.gpuMs is a finite non-negative number or null, consistent with the timer-query extension', async () => {
+    await run({ base: { solid: [1, 0, 0] }, window: { solid: [0, 0, 1] }, quad: [{ x: 0.3, y: 0.3 }, { x: 0.7, y: 0.3 }, { x: 0.7, y: 0.7 }, { x: 0.3, y: 0.7 }] });
+    const p = await page!.evaluate(() => (window as Window & { __w4?: W4Harness }).__w4!.pump(8));
+    // Environment note for the log: which branch this run exercised (SwiftShader has no GPU clock on some builds).
+    console.info(`[gpu.test] EXT_disjoint_timer_query_webgl2 present: ${p.extensionPresent}; stats.gpuMs after 8 frames: ${p.gpuMs} (headless Chromium, SwiftShader)`);
+    expect(p.passes).toBeGreaterThan(0);
+    expect(p.gpuTimer).toBe(p.extensionPresent);
+    if (p.gpuMs !== null) {
+      expect(Number.isFinite(p.gpuMs)).toBe(true);
+      expect(p.gpuMs).toBeGreaterThanOrEqual(0);
+    }
+    if (!p.extensionPresent) {
+      expect(p.gpuMs).toBeNull();
+    } else {
+      // With the extension, results land asynchronously within a few frames.
+      const more = await page!.evaluate(() => (window as Window & { __w4?: W4Harness }).__w4!.pump(30));
+      expect(typeof more.gpuMs).toBe('number');
+      expect(more.gpuMs).toBeGreaterThanOrEqual(0);
+    }
+  });
+
   gpuIt('context loss: render is a no-op while lost, resources rebuild on restore and pixels are correct again', async () => {
     const spec: SceneSpec = {
       base: { solid: [1, 0, 0] }, window: { solid: [0, 0, 1] },
@@ -359,10 +566,16 @@ describe('W4 compositor on a real WebGL2 context', () => {
     expect(lost.restoredSeen).toBe(true);
     expect(lost.renderDuringLoss.contextLost).toBe(true);
     expect(lost.renderDuringLoss.stats.passes).toBe(0);
+    expect(lost.renderDuringLoss.stats.gpuMs).toBeNull();
     const after = await run(spec);
     expect(after.contextLost).toBe(false);
     expect(after.contextLossCount).toBe(1);
     near(after.probes[0], BLUE);
     near(after.probes[1], RED);
+    // Contain still works on the rebuilt compositor.
+    const contain = await run({ ...spec, css: { w: 360, h: 360, dpr: 1 }, fitMode: 'contain', probesPx: [{ x: 2, y: 2 }, { x: 357, y: 357 }] });
+    near(contain.probes[0], BLUE);
+    near(contain.probesPx[0], BLACK, 2);
+    near(contain.probesPx[1], BLACK, 2);
   });
 });

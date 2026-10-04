@@ -3,7 +3,8 @@
  *
  * These prove the orchestration logic (progress reporting, GPU→CPU fallback, frame reuse,
  * segmentation stride, mirroring, sorting, timestamps, disposal). They do NOT prove that real
- * MediaPipe inference works — see docs/handoffs/W3.md for what was verified in a real browser.
+ * MediaPipe inference works — src/tracking/__harness__/verify.mjs runs the real tasks in Chromium
+ * (SwiftShader) for that.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 

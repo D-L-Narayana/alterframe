@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { FRAG_PRELUDE, VERTEX_SOURCE, buildFragmentSource, PRELUDE_UNIFORMS } from '../../../src/render/core/prelude';
 import { passthrough, solid } from '../../../src/render/core/passes';
 import { classifyUniform } from '../../../src/render/core/uniforms';
+import { DEFAULT_LOOK, DEFAULT_QUALITY } from '../../../src/types/render';
 
 describe('GLSL prelude', () => {
   it('declares every sampler and uniform promised by src/types/render.ts', () => {
@@ -49,7 +50,7 @@ describe('built-in passes', () => {
     expect(p.id).toMatch(/^solid/);
     expect(p.frag).toContain('u_solidColor');
     expect(p.uniforms).toBeTypeOf('function');
-    const u = p.uniforms!({ time: 0, width: 1, height: 1, scene: { base: 'live', persona: 'portrait', hudTint: 'white' }, quality: { renderScale: 1, maxDpr: 2, segmentationStride: 1 } });
+    const u = p.uniforms!({ time: 0, width: 1, height: 1, scene: { base: 'live', persona: 'portrait', hudTint: 'white' }, quality: { ...DEFAULT_QUALITY }, look: { ...DEFAULT_LOOK } });
     expect(u['u_solidColor']).toEqual([1, 0, 0, 1]);
     expect(solid([1, 0, 0, 1]).id).toBe(p.id);
     expect(solid([0, 1, 0, 1]).id).not.toBe(p.id);
@@ -57,7 +58,7 @@ describe('built-in passes', () => {
 
   it('solid accepts rgb and fills alpha with 1', () => {
     const p = solid([0.2, 0.4, 0.6]);
-    const u = p.uniforms!({ time: 0, width: 1, height: 1, scene: { base: 'live', persona: 'portrait', hudTint: 'white' }, quality: { renderScale: 1, maxDpr: 2, segmentationStride: 1 } });
+    const u = p.uniforms!({ time: 0, width: 1, height: 1, scene: { base: 'live', persona: 'portrait', hudTint: 'white' }, quality: { ...DEFAULT_QUALITY }, look: { ...DEFAULT_LOOK } });
     expect(u['u_solidColor']).toEqual([0.2, 0.4, 0.6, 1]);
   });
 });

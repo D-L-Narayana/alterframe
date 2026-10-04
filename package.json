@@ -1,7 +1,7 @@
 {
   "name": "alterframe",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Hold a window between your hands and reveal your illustrated alter ego. Browser-only hand/face tracking (MediaPipe) + WebGL2 stylization.",
   "license": "MIT",
@@ -19,6 +19,8 @@
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "postbuild": "node scripts/verify-dist.mjs",
     "preview": "vite preview --port 4173",
+    "serve:dist": "node scripts/serve-dist.mjs --port 4173",
+    "test:prod-gate": "playwright test tests/e2e/production-gate.spec.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

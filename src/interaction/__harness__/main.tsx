@@ -2,12 +2,15 @@
  * W7 dev harness (never imported by the app). Synthetic hands drive the real interaction
  * module; the quad is drawn as a translucent polygon with the debug overlay on top.
  * Run: `npx vite --port 6217` then open /src/interaction/__harness__/index.html
+ *
+ * Controls: the "Corner spring" slider and the "Hold still" select are bound to the
+ * InteractionSettings passed on every update (exactly how the app's Settings sheet drives them).
  */
 import { DEFAULT_INTERACTION_SETTINGS, DEFAULT_SCENE, HAND_LM } from '../../types';
 import type { HandTrack, InteractionSettings, SceneState, TrackingFrame, Vec2, Vec3 } from '../../types';
 import { createDirector, createInteraction, drawLandmarks } from '..';
 
-type Scenario = 'l-pose' | 'thumbs-up' | 'crossed' | 'slit' | 'gesture' | 'lost';
+type Scenario = 'l-pose' | 'thumbs-up' | 'crossed' | 'slit' | 'gesture' | 'lost' | 'dwell';
 
 function byId<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -21,6 +24,8 @@ if (!ctx) throw new Error('2d context unavailable');
 const scenarioEl = byId<HTMLSelectElement>('scenario');
 const orderingEl = byId<HTMLSelectElement>('ordering');
 const springEl = byId<HTMLInputElement>('spring');
+const springOut = byId<HTMLOutputElement>('springOut');
+const dwellEl = byId<HTMLSelectElement>('dwell');
 const gestureEl = byId<HTMLInputElement>('gesture');
 const directorBtn = byId<HTMLButtonElement>('director');
 const logEl = byId<HTMLPreElement>('log');
@@ -94,11 +99,23 @@ function synthFrame(scenario: Scenario, s: number, t: number): TrackingFrame {
         : [];
       break;
     }
+    case 'dwell': {
+      // 3 s cycle: 0–2 s hold still with sub-tolerance jitter (±0.003), 2–3 s sweep out and back.
+      // With dwellMs 1500 each cycle logs one `dwell` event ~1.5 s into the hold.
+      const phase = s % 3;
+      const jit = phase < 2 ? Math.sin(s * 37) * 0.003 : 0;
+      const sweep = phase < 2 ? 0 : Math.sin((phase - 2) * Math.PI) * 0.12;
+      hands = [
+        hand('left', { x: 0.25 + sweep + jit, y: 0.3 }, { x: 0.3 + sweep, y: 0.62 + jit }, { x: 0.22 + sweep, y: 0.55 }),
+        hand('right', { x: 0.75 + sweep, y: 0.32 + jit }, { x: 0.7 + sweep + jit, y: 0.6 }, { x: 0.78 + sweep, y: 0.55 }),
+      ];
+      break;
+    }
   }
   return { t, sourceWidth: 1280, sourceHeight: 720, hands, face: null, segmentation: null, timings: { handsMs: 0, faceMs: 0, segMs: 0, totalMs: 0 } };
 }
 
-let interaction = createInteraction();
+const interaction = createInteraction();
 let scene: SceneState = { ...DEFAULT_SCENE };
 const director = createDirector();
 let scenario: Scenario = 'l-pose';
@@ -114,9 +131,12 @@ scenarioEl.addEventListener('change', () => {
   scenarioStart = performance.now();
   interaction.reset();
 });
-springEl.addEventListener('change', () => {
-  interaction = createInteraction(springEl.checked ? { cornerSpring: { stiffness: 0.35 } } : {});
-});
+const showSpring = (): void => {
+  const v = Number(springEl.value) || 0;
+  springOut.textContent = v > 0 ? v.toFixed(2) : 'off';
+};
+springEl.addEventListener('input', showSpring);
+showSpring();
 directorBtn.addEventListener('click', () => {
   if (director.running) {
     director.stop();
@@ -132,6 +152,8 @@ function settings(): InteractionSettings {
     ...DEFAULT_INTERACTION_SETTINGS,
     ordering: orderingEl.value === 'faithful' ? 'faithful' : 'convex',
     gestureCycleEnabled: gestureEl.checked,
+    cornerSpring: Number(springEl.value) || 0,
+    dwellMs: Number(dwellEl.value) || 0,
   };
 }
 
@@ -168,7 +190,9 @@ function frameLoop(): void {
   ctx!.fillStyle = '#f5f5f7';
   ctx!.font = '20px system-ui';
   ctx!.fillText(`scene ${scene.base}/${scene.persona} hud=${scene.hudTint}  director=${director.running ? `step ${director.stepIndex(t)}` : 'off'}`, 16, 32);
-  logEl.textContent = log.join('\n');
+  const pct = Math.round((out.debug.dwellProgress ?? 0) * 100);
+  const dwellLine = `dwellProgress ${String(pct).padStart(3, ' ')}%  ${'█'.repeat(Math.round(pct / 5)).padEnd(20, '░')}  (dwellMs ${settings().dwellMs || 'off'})`;
+  logEl.textContent = [dwellLine, ...log].join('\n');
   requestAnimationFrame(frameLoop);
 }
 requestAnimationFrame(frameLoop);

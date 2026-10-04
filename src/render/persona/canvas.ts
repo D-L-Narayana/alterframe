@@ -3,8 +3,8 @@
  *  - In the browser we prefer OffscreenCanvas (no DOM, cheap), falling back to HTMLCanvasElement.
  *  - In Node tests a fake factory is injected so `update()` logic stays testable without pixels.
  *
- * `__dirty` protocol (contract addendum v1.1.0): the producer sets `__dirty = true` whenever it
- * repaints; the renderer (W4) uploads the texture and sets it back to `false`.
+ * `__dirty` protocol (`DirtyCanvas` in src/types/runtime.ts): the producer sets `__dirty = true`
+ * whenever it repaints; the renderer (W4) uploads the texture and sets it back to `false`.
  */
 
 /** Minimal 2D API we rely on — identical on CanvasRenderingContext2D and OffscreenCanvasRenderingContext2D. */

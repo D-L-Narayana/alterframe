@@ -15,7 +15,8 @@ interface VideoWithRvfc {
  *  1. `requestVideoFrameCallback` when the element supports it (Chromium, Safari):
  *     fires exactly once per presented frame → no duplicate work, no missed frames.
  *  2. Otherwise `requestAnimationFrame` polling, emitting only when
- *     `video.currentTime` advanced (so a paused/stalled video does not spin the pipeline).
+ *     `video.currentTime` changed (so a paused/stalled video does not spin the pipeline,
+ *     while a seek on a paused clip still presents its new frame once).
  *
  * The clock is armed only while ≥1 listener is registered AND `running` is true,
  * so `stop()` cancels every pending callback (contract: stop cancels callbacks).
@@ -50,9 +51,9 @@ export function createFrameClock(video: VideoLike, env: MediaEnv) {
     rafHandle = env.requestAnimationFrame((now) => {
       rafHandle = null;
       if (!running) return;
-      // Only a change in currentTime means a new frame was decoded.
+      // Only a change in currentTime means a new frame is available — also after a seek while paused.
       const ct = video.currentTime;
-      if (ct !== lastTime && !video.paused && video.readyState >= 2 /* HAVE_CURRENT_DATA */) {
+      if (ct !== lastTime && video.readyState >= 2 /* HAVE_CURRENT_DATA */) {
         lastTime = ct;
         presented += 1;
         emit(now, presented);

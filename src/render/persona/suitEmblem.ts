@@ -21,7 +21,7 @@ const LEG_ANGLES_DEG = [62, 28, -8, -42] as const;   // front → back, one side
 const LEG_KNEE = 0.55;                                 // knee at 55 % of the reach
 const LEG_LIFT = 0.28;                                 // knee lifted above the straight line (fraction of reach)
 
-/** Build the crest centred at `center`, with a total span of 1.1 × `faceWidth` (contract §W6). */
+/** Build the crest centred at `center`, with a total span of 1.1 × `faceWidth`. */
 export function spiderEmblem(center: Vec2, faceWidth: number): SpiderEmblem {
   const span = faceWidth * 1.1;
   const half = span / 2;

@@ -1,16 +1,18 @@
 /**
- * Pure geometry for the compositor: cover-fit mapping, backing-store sizing,
+ * Pure geometry for the compositor: cover/contain fit mappings, backing-store sizing,
  * display→clip conversion and quad triangulation. No WebGL here (unit-testable in Node).
  *
  * COORDINATE CONVENTIONS (binding, see src/types/geometry.ts)
  * ------------------------------------------------------------
  * "Display space" = normalized [0,1], origin top-left, mirrored already applied. The tracker
- * (W3) emits it relative to the VIDEO frame, so display space == mirrored video-normalized space.
+ * emits it relative to the VIDEO frame, so display space == mirrored video-normalized space.
  *
- * Integration agreement (lead): landmarks are normalized in the mirrored INTRINSIC VIDEO frame;
- * the persona overlay/backdrop (W6) and HUD (W8) canvases have the video frame's size/aspect; the
- * whole pipeline (video, mask, quad, overlays, HUD) is composited in that one video space and the
- * compositor applies a SINGLE cover-fit transform (`coverFit(video → canvas)`) in its present pass.
+ * Integration agreement: landmarks are normalized in the mirrored INTRINSIC VIDEO frame; the
+ * persona overlay/backdrop and HUD canvases have the video frame's size/aspect; the whole pipeline
+ * (video, mask, quad, overlays, HUD) is composited in that one video space and the compositor
+ * applies a SINGLE fit transform (`fitFor(mode, video → canvas)`) in its present pass:
+ *   - 'cover'   crops like `object-fit: cover` (the v0.1 behaviour and the default);
+ *   - 'contain' letterboxes: the whole frame is shown, canvas pixels outside it are opaque black.
  * The canvas backing store is the CSS box × dpr (what the user sees is what gets recorded).
  * Nothing is mirrored twice (only the video sampling flips) and nothing is stretched.
  *
@@ -21,27 +23,39 @@
  * The single y flip in the whole pipeline happens in the present pass, because the default
  * framebuffer shows clip y = +1 at the top of the screen.
  */
-import type { QuadCorners, Size, Vec2 } from '@/types';
+import type { FitMode, QuadCorners, Rect, Size, Vec2 } from '@/types';
 
-/** Mapping from canvas-normalized uv to display uv: `display = canvasUv * uvScale + uvOffset`. */
+/**
+ * Mapping from canvas-normalized uv to display uv: `display = canvasUv * uvScale + uvOffset`.
+ * Cover: uvScale ≤ 1, uvOffset ≥ 0 (a centred crop of the display frame fills the canvas).
+ * Contain: uvScale ≥ 1, uvOffset ≤ 0 on the letterboxed axis (canvas rows/columns in the bars map
+ * outside [0,1]; the present pass paints them black).
+ */
 export interface CoverFit {
   uvScale: [number, number];
   uvOffset: [number, number];
-  /** Visible sub-rectangle of the display frame, normalized (what survives the crop). */
-  visible: { x: number; y: number; w: number; h: number };
+  /** Visible sub-rectangle of the display frame, normalized (what survives the crop; the whole frame for contain). */
+  visible: Rect;
 }
 
-const IDENTITY_FIT: CoverFit = { uvScale: [1, 1], uvOffset: [0, 0], visible: { x: 0, y: 0, w: 1, h: 1 } };
+/** Same shape for either mode; `coverFit`, `containFit` and `fitFor` all return it. */
+export type FitMapping = CoverFit;
+
+const ASPECT_EPS = 1e-9;
+
+function identityFit(): CoverFit {
+  return { uvScale: [1, 1], uvOffset: [0, 0], visible: { x: 0, y: 0, w: 1, h: 1 } };
+}
 
 /**
  * object-fit: cover of a source of size (srcW,srcH) into a destination (dstW,dstH).
  * Returns the uv transform that, given a destination uv, yields the source uv to sample.
  */
 export function coverFit(srcW: number, srcH: number, dstW: number, dstH: number): CoverFit {
-  if (!(srcW > 0 && srcH > 0 && dstW > 0 && dstH > 0)) return { ...IDENTITY_FIT, uvScale: [1, 1], uvOffset: [0, 0] };
+  if (!(srcW > 0 && srcH > 0 && dstW > 0 && dstH > 0)) return identityFit();
   const srcAspect = srcW / srcH;
   const dstAspect = dstW / dstH;
-  if (Math.abs(srcAspect - dstAspect) < 1e-9) return { uvScale: [1, 1], uvOffset: [0, 0], visible: { x: 0, y: 0, w: 1, h: 1 } };
+  if (Math.abs(srcAspect - dstAspect) < ASPECT_EPS) return identityFit();
   if (dstAspect > srcAspect) {
     // Destination is wider: full source width is shown, source is cropped top/bottom.
     const sy = srcAspect / dstAspect;
@@ -52,6 +66,44 @@ export function coverFit(srcW: number, srcH: number, dstW: number, dstH: number)
   const sx = dstAspect / srcAspect;
   const ox = (1 - sx) / 2;
   return { uvScale: [sx, 1], uvOffset: [ox, 0], visible: { x: ox, y: 0, w: sx, h: 1 } };
+}
+
+/**
+ * object-fit: contain (letterbox) of a source of size (srcW,srcH) into a destination (dstW,dstH).
+ * The whole source stays visible, centred; on the letterboxed axis uvScale > 1 and uvOffset < 0, so
+ * destination uv in the bars maps to source uv outside [0,1] (the present pass paints those black).
+ */
+export function containFit(srcW: number, srcH: number, dstW: number, dstH: number): CoverFit {
+  if (!(srcW > 0 && srcH > 0 && dstW > 0 && dstH > 0)) return identityFit();
+  const srcAspect = srcW / srcH;
+  const dstAspect = dstW / dstH;
+  if (Math.abs(srcAspect - dstAspect) < ASPECT_EPS) return identityFit();
+  if (dstAspect > srcAspect) {
+    // Destination is wider: full source height is shown, bars left and right (pillarbox).
+    const sx = dstAspect / srcAspect;
+    const ox = (1 - sx) / 2;
+    return { uvScale: [sx, 1], uvOffset: [ox, 0], visible: { x: 0, y: 0, w: 1, h: 1 } };
+  }
+  // Destination is taller: full source width is shown, bars top and bottom (letterbox).
+  const sy = srcAspect / dstAspect;
+  const oy = (1 - sy) / 2;
+  return { uvScale: [1, sy], uvOffset: [0, oy], visible: { x: 0, y: 0, w: 1, h: 1 } };
+}
+
+/** The present-pass mapping for a `FitMode` ('cover' is the default and the v0.1 behaviour). */
+export function fitFor(mode: FitMode, srcW: number, srcH: number, dstW: number, dstH: number): CoverFit {
+  return mode === 'contain' ? containFit(srcW, srcH, dstW, dstH) : coverFit(srcW, srcH, dstW, dstH);
+}
+
+/**
+ * Canvas-normalized rectangle the display frame occupies under a fit (where display uv [0,1]²
+ * lands). Inside [0,1]² for contain (the bars are its complement); spills outside for cover.
+ */
+export function fitContentRect(fit: CoverFit): Rect {
+  const [sx, sy] = fit.uvScale;
+  const [ox, oy] = fit.uvOffset;
+  // `0 - ox` (not `-ox`) keeps a zero offset at +0 so identity fits compare equal to {0,0,1,1}.
+  return { x: (0 - ox) / sx, y: (0 - oy) / sy, w: 1 / sx, h: 1 / sy };
 }
 
 /** Canvas backing-store size for a CSS box: css × min(dpr, maxDpr), never zero. */
@@ -107,14 +159,14 @@ export function quadToClipTriangles(corners: QuadCorners): Float32Array {
   return out;
 }
 
-/** Display point → canvas pixel (top-left origin) through a cover-fit mapping. */
+/** Display point → canvas pixel (top-left origin) through a cover or contain fit mapping. */
 export function displayToCanvasPx(p: Vec2, canvasW: number, canvasH: number, fit: CoverFit): Vec2 {
   const u = (p.x - fit.uvOffset[0]) / fit.uvScale[0];
   const v = (p.y - fit.uvOffset[1]) / fit.uvScale[1];
   return { x: u * canvasW, y: v * canvasH };
 }
 
-/** Canvas pixel → display point through a cover-fit mapping. */
+/** Canvas pixel → display point through a cover or contain fit mapping (outside [0,1] on the bars). */
 export function canvasPxToDisplay(px: Vec2, canvasW: number, canvasH: number, fit: CoverFit): Vec2 {
   const u = px.x / canvasW;
   const v = px.y / canvasH;

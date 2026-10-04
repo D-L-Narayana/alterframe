@@ -11,11 +11,16 @@
  *
  * Thickness: the Sobel taps are spread by `u_inkWidth * 0.75` texels. Spreading the taps
  * widens the gradient response, which is what makes the line thicker; `u_inkWidth` is
- * 2 px at 720p clamped to 1.5–2.5 display px (see `inkWidthTexels`).
+ * 2 px at 720p clamped to 1.5–2.5 display px (see `inkWidthTexels`) × `look.inkWidth`.
+ *
+ * Look: `look.inkWidth` multiplies the line width; `look.inkThreshold` multiplies both Sobel
+ * thresholds together (> 1 = only stronger edges become lines). Defaults of 1 reproduce the
+ * authored values exactly.
  *
  * Variants:
  *  - paper (paper-portrait): lines are drawn EVERYWHERE (room line-art), colour is kept
- *    only where the mask says "person"; background becomes `u_backdrop` (paper, W6).
+ *    only where the mask says "person"; background becomes `u_backdrop` (the persona
+ *    layer's paper).
  *  - comic: lines over the cel colour everywhere; does not read `u_backdrop` so the same
  *    pass is valid for the full-frame comic base layer.
  *
@@ -24,7 +29,13 @@
  */
 import type { PassContext, StylePass } from '../../types/render';
 import { PERSONA_TOKENS } from '../../types/persona';
-import { glsl, LUMA, PERSON_MASK, inkWidthTexels, type Uniforms } from './glsl';
+import { glsl, LUMA, PERSON_MASK, inkWidthTexels, lookFactor, type Uniforms } from './glsl';
+
+/**
+ * Floor for the threshold multiplier: keeps `u_edgeLo` strictly below `u_edgeHi`
+ * (`smoothstep(lo, lo, x)` is undefined in GLSL). The settings UI never goes below 0.25.
+ */
+const MIN_INK_THRESHOLD = 0.05;
 
 const INK_RGB = hexToRgb(PERSONA_TOKENS.ink);
 
@@ -115,10 +126,13 @@ void main() {
 `;
 
 function baseUniforms(ctx: PassContext): Uniforms {
+  const threshold = Math.max(MIN_INK_THRESHOLD, lookFactor(ctx.look, 'inkThreshold'));
   return {
-    u_inkWidth: inkWidthTexels(ctx),
-    u_edgeLo: 0.2,
-    u_edgeHi: 0.5,
+    // Authored width (clamped in display px) × the look multiplier; 1 → the v0.1 value exactly.
+    u_inkWidth: inkWidthTexels(ctx) * lookFactor(ctx.look, 'inkWidth'),
+    // Both thresholds scale by the same factor so the line's soft edge keeps its shape.
+    u_edgeLo: 0.2 * threshold,
+    u_edgeHi: 0.5 * threshold,
     u_silhouette: 0.85,
     u_inkColor: INK_RGB,
   };

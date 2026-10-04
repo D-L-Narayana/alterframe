@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { STYLE_PRESETS } from '../../../src/render/styles';
 import { ALL_PASSES, PRELUDE, glslUniformDecls } from '../../../src/render/shaders';
 import type { PassContext, StylePass, UniformValue } from '../../../src/types/render';
-import { DEFAULT_QUALITY } from '../../../src/types/render';
+import { DEFAULT_LOOK, DEFAULT_QUALITY } from '../../../src/types/render';
 import { DEFAULT_SCENE } from '../../../src/types/scene';
 
 /** Uniform names the core prelude already declares (src/types/render.ts). */
 const PRELUDE_UNIFORMS = ['u_color', 'u_video', 'u_mask', 'u_backdrop', 'u_resolution', 'u_texel', 'u_time'];
 
-const ctx: PassContext = { time: 1.5, width: 1280, height: 720, scene: DEFAULT_SCENE, quality: DEFAULT_QUALITY };
+const ctx: PassContext = { time: 1.5, width: 1280, height: 720, scene: DEFAULT_SCENE, quality: DEFAULT_QUALITY, look: DEFAULT_LOOK };
 
 function glslTypeOf(v: UniformValue): string {
   if (typeof v === 'number') return 'float';

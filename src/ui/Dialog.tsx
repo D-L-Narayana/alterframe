@@ -12,14 +12,16 @@ export interface DialogProps {
   /** 'dialog' = centred modal; 'sheet' = side (desktop) / bottom (mobile) panel. */
   variant?: 'dialog' | 'sheet';
   describedBy?: string;
+  /** Called on Esc instead of `onClose` (lets the app apply its Esc priority, e.g. cancel a countdown first). */
+  onEscape?: () => void;
 }
 
 /** Modal dialog: role=dialog, aria-modal, focus trap, Esc closes, focus restored on close. */
-export function Dialog({ open, title, onClose, children, footer, variant = 'dialog', describedBy }: DialogProps) {
+export function Dialog({ open, title, onClose, children, footer, variant = 'dialog', describedBy, onEscape }: DialogProps) {
   const id = useId();
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  useFocusTrap(ref, open, onClose, closeRef);
+  useFocusTrap(ref, open, onEscape ?? onClose, closeRef);
   if (!open) return null;
   return (
     <>
@@ -37,7 +39,8 @@ export function Dialog({ open, title, onClose, children, footer, variant = 'dial
           <h2 id={`${id}-title`} className="af-panel__title">{title}</h2>
           <IconButton ref={closeRef} label="Close" shortcut="Esc" icon={<CloseIcon />} onClick={onClose} />
         </div>
-        <div className="af-panel__body">{children}</div>
+        {/* The body scrolls when the content is taller than the panel: keyboard users must be able to focus it to scroll (axe scrollable-region-focusable). */}
+        <div className="af-panel__body" tabIndex={0}>{children}</div>
         {footer ? <div className="af-panel__foot">{footer}</div> : null}
       </div>
     </>

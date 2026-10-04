@@ -1,20 +1,25 @@
 #!/usr/bin/env node
 /**
- * W5 GPU verification: compiles every pass on a real WebGL2 context (headless Chromium,
- * SwiftShader) and checks rendered pixels of each preset on the procedural test scene.
+ * Shader GPU verification: compiles every pass on a real WebGL2 context (headless Chromium
+ * with SwiftShader — a CPU rasteriser, so every timing printed here is informational only) and
+ * checks rendered pixels of each preset on the procedural test scene, including the look-tuning
+ * extremes (defaults must be a no-op; each knob must move pixels in its documented direction).
  *
- * Usage: start the harness server first (`npx vite --port 6215`), then
- *   node src/render/shaders/__harness__/verify.mjs [--url http://localhost:6215] [--out /tmp/w5]
- * Exits non-zero on any failure. Writes PNG snapshots to --out for eyeballing.
+ * One-shot (starts and stops the dev server itself):
+ *   node src/render/shaders/__harness__/run-verify.mjs
+ * Against a running harness server (`npx vite --port 6215 --host 127.0.0.1`):
+ *   node src/render/shaders/__harness__/verify.mjs [--url http://127.0.0.1:6215] [--out <dir>]
+ * Exits non-zero on any failure. Writes PNG snapshots to --out (default: the OS temp dir) for eyeballing.
  */
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const args = process.argv.slice(2);
 const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
-const BASE = arg('--url', 'http://localhost:6215');
-const OUT = arg('--out', '/tmp/w5-verify');
+const BASE = arg('--url', 'http://127.0.0.1:6215').replace(/\/$/, '');
+const OUT = arg('--out', join(tmpdir(), 'alterframe-shader-verify'));
 mkdirSync(OUT, { recursive: true });
 
 const failures = [];
@@ -23,9 +28,11 @@ function check(name, cond, detail = '') {
   if (cond) notes.push(`ok   ${name} ${detail}`);
   else failures.push(`FAIL ${name} ${detail}`);
 }
-const lum = ([r, g, b]) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+const spread = (m) => Math.max(...m) - Math.min(...m);
 const PAPER = [0xf6, 0xf3, 0xec];
+/** Mirrors DEFAULT_LOOK in src/types/render.ts (kept literal here so the script stays dependency-free). */
+const DEFAULT_LOOK = { inkWidth: 1, inkThreshold: 1, halftone: 1, saturation: 1, bands: 6, grain: 1, overlayStrength: 1 };
 
 const browser = await chromium.launch({
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--enable-webgl'],
@@ -109,7 +116,35 @@ check('pp @0.5 door edge still inked', half.doorColumn.edgeDark > 0.3 && half.do
 
 // 11. Larger frame timing (1280×720) — informational, SwiftShader is CPU so no threshold.
 const big = await render({ preset: 'comic', persona: 'masked', width: 1280, height: 720 });
-notes.push(`info 1280x720 comic: cpu ${big.cpuMs.toFixed(1)} ms, gpu ${big.gpuMs === null ? 'n/a' : big.gpuMs.toFixed(1) + ' ms'} (SwiftShader)`);
+notes.push(`info 1280x720 comic: cpu ${big.cpuMs.toFixed(1)} ms, gpu ${big.gpuMs === null ? 'n/a' : big.gpuMs.toFixed(1) + ' ms'} (SwiftShader, CPU rasteriser — not representative of real GPUs)`);
+
+// 12. Look tuning. Defaults are a no-op (bit-identical frame); each extreme moves pixels the documented way.
+const ppDefault = await render({ preset: 'paper-portrait', look: { ...DEFAULT_LOOK } });
+check('look: explicit DEFAULT_LOOK renders bit-identical pixels to the implicit default', ppDefault.checksum === pp.checksum, `${ppDefault.checksum} vs ${pp.checksum}`);
+const thick = await render({ preset: 'paper-portrait', look: { inkWidth: 3 } }, 'look-ink-thick');
+check('look: inkWidth 3 keeps the door edge at least as dark (5-px window)', thick.doorColumn.edgeDark >= pp.doorColumn.edgeDark, `thick=${thick.doorColumn.edgeDark.toFixed(2)} default=${pp.doorColumn.edgeDark.toFixed(2)}`);
+check('look: inkWidth 3 widens the door line (13-px window dark fraction rises)', thick.doorColumn.edgeDarkWide > pp.doorColumn.edgeDarkWide + 0.1, `thick=${thick.doorColumn.edgeDarkWide.toFixed(2)} default=${pp.doorColumn.edgeDarkWide.toFixed(2)}`);
+check('look: inkWidth 3 changes the frame (checksum differs)', thick.checksum !== pp.checksum);
+const thrHi = await render({ preset: 'paper-portrait', look: { inkThreshold: 3 } }, 'look-ink-threshold-high');
+const thrLo = await render({ preset: 'paper-portrait', look: { inkThreshold: 0.25 } }, 'look-ink-threshold-low');
+check('look: inkThreshold 3 draws fewer dark pixels than default, 0.25 draws more', thrHi.frameDarkFrac < pp.frameDarkFrac && thrLo.frameDarkFrac > pp.frameDarkFrac, `hi=${thrHi.frameDarkFrac.toFixed(3)} default=${pp.frameDarkFrac.toFixed(3)} lo=${thrLo.frameDarkFrac.toFixed(3)}`);
+const halfOff = await render({ preset: 'pass:halftone', look: { halftone: 0 } }, 'look-halftone-0');
+check('look: halftone 0 removes the dot texture (wall-mid std drops vs default)', halfOff.probes['wall-mid'].std < withHalf.probes['wall-mid'].std - 0.015, `off=${halfOff.probes['wall-mid'].std.toFixed(3)} default=${withHalf.probes['wall-mid'].std.toFixed(3)}`);
+check('look: halftone 0 is a no-op (wall-mid luma equals the quantize output)', Math.abs(halfOff.probes['wall-mid'].lumaMean - noHalf.probes['wall-mid'].lumaMean) < 0.01, `off=${halfOff.probes['wall-mid'].lumaMean.toFixed(3)} quantize=${noHalf.probes['wall-mid'].lumaMean.toFixed(3)}`);
+const grey = await render({ preset: 'paper-portrait', look: { saturation: 0 } }, 'look-saturation-0');
+check('look: saturation 0 makes the skin grey (r ≈ g ≈ b)', spread(grey.probes['skin-flat'].mean) <= 3, `mean=${grey.probes['skin-flat'].mean.map(Math.round)}`);
+const vivid = await render({ preset: 'paper-portrait', look: { saturation: 2 } });
+check('look: saturation 2 is more saturated than default (wider channel spread on skin)', spread(vivid.probes['skin-flat'].mean) > spread(pp.probes['skin-flat'].mean), `vivid=${spread(vivid.probes['skin-flat'].mean).toFixed(1)} default=${spread(pp.probes['skin-flat'].mean).toFixed(1)}`);
+const b3 = await render({ preset: 'pass:quantize-clean', scene: 'ramp', look: { bands: 3 } }, 'look-bands-3');
+const b6 = await render({ preset: 'pass:quantize-clean', scene: 'ramp' });
+const b8 = await render({ preset: 'pass:quantize-clean', scene: 'ramp', look: { bands: 8 } }, 'look-bands-8');
+check('look: bands 3 yields fewer luma levels than bands 8 on a grey ramp', b3.rowLevels < b8.rowLevels, `levels 3→${b3.rowLevels} 6→${b6.rowLevels} 8→${b8.rowLevels}`);
+check('look: the plateau count on the ramp equals the band count (3 / 6 / 8)', b3.rowLevels === 3 && b6.rowLevels === 6 && b8.rowLevels === 8, `levels 3→${b3.rowLevels} 6→${b6.rowLevels} 8→${b8.rowLevels}`);
+const grain0 = await render({ preset: 'pass:grade-comic', look: { grain: 0 } });
+const grain3 = await render({ preset: 'pass:grade-comic', look: { grain: 3 } });
+check('look: grain 0 flattens the wall and grain 3 roughens it (std ordering)', grain0.probes['wall-flat'].std < g.probes['wall-flat'].std && grain3.probes['wall-flat'].std > g.probes['wall-flat'].std, `0→${grain0.probes['wall-flat'].std.toFixed(3)} default→${g.probes['wall-flat'].std.toFixed(3)} 3→${grain3.probes['wall-flat'].std.toFixed(3)}`);
+const ppAgain = await render({ preset: 'paper-portrait' });
+check('look: rendering the default again after the extremes is still bit-identical (no state leaks between looks)', ppAgain.checksum === pp.checksum, `${ppAgain.checksum} vs ${pp.checksum}`);
 
 check('no console errors', consoleErrors.length === 0, consoleErrors.join(' | '));
 

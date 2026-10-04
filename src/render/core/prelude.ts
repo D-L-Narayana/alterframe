@@ -1,6 +1,6 @@
 /**
  * GLSL ES 3.00 sources shared by every pass. The fragment prelude is the contract documented in
- * src/types/render.ts (StylePass): W5 writes only the body after it.
+ * src/types/render.ts (StylePass): style passes write only the body after it.
  */
 
 /** Fullscreen triangle vertex shader. v_uv = clip*0.5+0.5 (texel row 0 == display top, see fit.ts). */
@@ -16,7 +16,7 @@ void main() {
 }
 `;
 
-/** Uniform names the prelude declares (W5 passes may use them without declaring). */
+/** Uniform names the prelude declares (style passes may use them without declaring). */
 export const PRELUDE_UNIFORMS = ['u_color', 'u_video', 'u_mask', 'u_backdrop', 'u_resolution', 'u_texel', 'u_time'] as const;
 
 export const FRAG_PRELUDE = `#version 300 es
@@ -27,7 +27,7 @@ in vec2 v_uv;                 // 0..1, (0,0) = top-left of DISPLAY space
 uniform sampler2D u_color;    // previous pass output (video for the first pass)
 uniform sampler2D u_video;    // mirrored live video, display space
 uniform sampler2D u_mask;     // person confidence in .r, display space
-uniform sampler2D u_backdrop; // persona backdrop (W6), display space
+uniform sampler2D u_backdrop; // persona backdrop, display space
 uniform vec2  u_resolution;   // pass output size in px
 uniform vec2  u_texel;        // 1 / u_resolution
 uniform float u_time;         // seconds

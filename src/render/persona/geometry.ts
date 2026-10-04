@@ -7,7 +7,7 @@ import { FACE_LM } from '../../types';
  * normalized display space of the tracking contract with `toPx`. No canvas calls — unit-testable.
  */
 
-/** Face oval ring (MediaPipe face-mesh silhouette), forehead (10) → screen-right → chin (152) → screen-left. Contract §W6. */
+/** Face oval ring (MediaPipe face-mesh silhouette), forehead (10) → screen-right → chin (152) → screen-left. */
 export const FACE_OVAL_INDICES: readonly number[] = [
   10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377,
   152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109,
@@ -152,16 +152,20 @@ export const LENS_TILT = 0.38;
 
 /**
  * Masked-persona eye lens. Built in a local frame along +x, tilted up by LENS_TILT, mirrored for the
- * screen-left eye, then rotated by head roll about the eye centre. `scale` multiplies eye width.
+ * screen-left eye, then rotated by head roll about the eye centre. `scale` multiplies eye width;
+ * `squash` (0..1, see `lensSquash`) scales the lens across its long axis (local y) about the eye
+ * centre — the squint. With squash 1 the output is bit-identical to the unsquashed lens.
  */
-export function lensShape(eye: Pick<EyeMetrics, 'center' | 'width'>, side: ScreenSide, roll: number, scale = 1): LensPath {
+export function lensShape(eye: Pick<EyeMetrics, 'center' | 'width'>, side: ScreenSide, roll: number, scale = 1, squash = 1): LensPath {
   const w = eye.width * scale;
   const outward = side === 'left' ? -1 : 1;
   const ct = Math.cos(-LENS_TILT), st = Math.sin(-LENS_TILT);
   const cr = Math.cos(roll), sr = Math.sin(roll);
   const map = (p: Vec2): Vec2 => {
+    // 0) squint: squash across the lens' long axis (local y), about the eye centre
+    const py = p.y * squash;
     // 1) tilt in local frame (tip goes up: negative y)
-    const tx = p.x * ct - p.y * st, ty = p.x * st + p.y * ct;
+    const tx = p.x * ct - py * st, ty = p.x * st + py * ct;
     // 2) mirror for screen-left so the tip points to the temple, 3) scale to px
     const mx = tx * outward * w, my = ty * w;
     // 4) head roll, 5) translate to eye centre
@@ -180,7 +184,7 @@ export function lensPoints(path: LensPath): Vec2[] {
 
 /** Proportions of the suit torso relative to the face box (px). */
 export const TORSO = {
-  /** Shoulder half-width as a multiple of face width (total 1.6×, contract §W6). */
+  /** Shoulder half-width as a multiple of face width (total 1.6× — the user's own clothing stays visible beside the suit). */
   shoulderHalf: 0.8,
   /** Shoulder line below the chin, as a multiple of face height. */
   shoulderDrop: 0.45,
@@ -239,3 +243,18 @@ export function mouthMetrics(face: FaceTrack, size: Size): { left: Vec2; right: 
 }
 
 export const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+/** Hermite smoothstep between the edges e0 < e1: exactly 0 at/below e0, exactly 1 at/above e1. */
+export function smoothstep(e0: number, e1: number, v: number): number {
+  const x = clamp01((v - e0) / (e1 - e0));
+  return x * x * (3 - 2 * x);
+}
+
+/**
+ * Vertical squash of the masked lens for an eye openness (0..1 from the tracker):
+ * 0.55 with the lid closed, rising smoothly between 15 % and 75 % open, exactly 1 above that
+ * (so a normally open eye, e.g. openness 0.95, draws the unsquashed lens).
+ */
+export function lensSquash(open: number): number {
+  return 0.55 + 0.45 * smoothstep(0.15, 0.75, open);
+}

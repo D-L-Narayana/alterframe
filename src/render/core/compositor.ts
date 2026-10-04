@@ -1,18 +1,20 @@
 /**
- * Frame pipeline (plan §2), all in VIDEO space at the internal resolution, then one cover-fit present:
+ * Frame pipeline, all in VIDEO space at the internal resolution, then one fit present:
  *
  *   raw video ──ingest(mirror)──▶ videoTex ──baseStyle passes──▶ baseTex ─┐
  *                                    └──windowStyle passes──▶ winTex ─────┼─▶ composite target
  *   quad (2 triangles, alpha = quad.opacity, glitch uv shift) samples winTex ⊕ personaOverlay ┘
- *   composite ──present(coverFit video→canvas, y flip)──▶ canvas, HUD composited at the same display uv
+ *   composite ──present(fitFor(mode) video→canvas, y flip, black bars)──▶ canvas, HUD at the same display uv
  *
  * Owns every GL object it creates; `dispose()` frees them. After a context loss the renderer simply
- * builds a new Compositor (see index.ts).
+ * builds a new Compositor (see index.ts). A GPU timer query brackets the frame's draws when
+ * `EXT_disjoint_timer_query_webgl2` exists (results are read on later frames, see gpuTimer.ts).
  */
-import type { PassContext, QuadCorners, RenderInputs, StylePreset } from '@/types';
-import { PERSONA_TOKENS } from '@/types';
-import { coverFit, internalSize, quadToClipTriangles, TEXTURE_UNITS } from './fit';
+import type { FitMode, PassContext, QuadCorners, RenderInputs, StylePreset } from '@/types';
+import { DEFAULT_LOOK, PERSONA_TOKENS } from '@/types';
+import { fitFor, internalSize, quadToClipTriangles, TEXTURE_UNITS } from './fit';
 import { PassRunner, ProgramCache, TargetPool, bindUnit, createSolidTexture, fullscreenTriangle, GlError, type RenderTarget } from './gl';
+import { GpuTimer } from './gpuTimer';
 import { buildFragmentSource } from './prelude';
 import { MaskTexture, SourceTexture, sourceReady, type UploadCounters } from './textures';
 import { INGEST_FRAG, PRESENT_FRAG, QUAD_VERTEX, WINDOW_FRAG } from './shaders';
@@ -23,8 +25,12 @@ export interface CompositorDebug {
   internalHeight: number;
   maskFormat: 'R32F' | 'R8';
   targets: number;
-  /** Fit mapping used by the last present (canvas uv → display uv). */
-  fit: { uvScale: [number, number]; uvOffset: [number, number] };
+  /** Fit mapping used by the last present (canvas uv → display uv) and the mode it was built for. */
+  fit: { mode: FitMode; uvScale: [number, number]; uvOffset: [number, number] };
+  /** Linked programs in the cache (fixed core programs + every pass compiled or warmed so far). */
+  programs: number;
+  /** Whether EXT_disjoint_timer_query_webgl2 exists on this context (gpuMs stays null otherwise). */
+  gpuTimer: boolean;
 }
 
 const EMPTY_PRESET: StylePreset = { id: 'comic', passes: [], usesBackdrop: false };
@@ -49,6 +55,7 @@ export class Compositor {
   private readonly quadVao: WebGLVertexArrayObject;
   private readonly quadVbo: WebGLBuffer;
   private readonly quadData = new Float32Array(24);
+  private readonly timer: GpuTimer;
   private internal = { width: 2, height: 2 };
   private lastTrackingT = Number.NaN;
   private passCount = 0;
@@ -66,6 +73,7 @@ export class Compositor {
     this.mask = new MaskTexture(gl);
     this.transparent = createSolidTexture(gl, [0, 0, 0, 0]);
     this.paper = createSolidTexture(gl, hexToBytes(PERSONA_TOKENS.paperWhite));
+    this.timer = new GpuTimer(gl);
     const vao = gl.createVertexArray();
     const vbo = gl.createBuffer();
     if (!vao || !vbo) throw new GlError('quad VAO/VBO allocation failed');
@@ -85,17 +93,51 @@ export class Compositor {
       internalHeight: 2,
       maskFormat: this.mask.format,
       targets: 0,
-      fit: { uvScale: [1, 1], uvOffset: [0, 0] },
+      fit: { mode: 'cover', uvScale: [1, 1], uvOffset: [0, 0] },
+      programs: 0,
+      gpuTimer: this.timer.available,
     };
     // Warm the fixed programs so the first frame does not stall on compilation.
     this.programs.get(buildFragmentSource(INGEST_FRAG));
     this.programs.get(buildFragmentSource(PRESENT_FRAG));
     this.programs.get(buildFragmentSource(WINDOW_FRAG), QUAD_VERTEX);
+    this.debug.programs = this.programs.size;
   }
 
   /** Passes/draws issued by the last `render`. */
   get passes(): number {
     return this.passCount;
+  }
+
+  /** Newest completed GPU frame time in ms, or null (no timer extension / disjoint / no result yet). */
+  get gpuMs(): number | null {
+    return this.timer.gpuMs;
+  }
+
+  /**
+   * Compile (and cache) the program of every pass of `preset`. Already-cached passes cost nothing,
+   * so calling this repeatedly is harmless. Returns the number of programs newly compiled; throws
+   * `GlError` with the shader log when a pass does not build.
+   */
+  warmPreset(preset: StylePreset): number {
+    let compiled = 0;
+    for (const pass of preset.passes) {
+      const source = buildFragmentSource(pass.frag);
+      if (this.programs.has(source)) continue;
+      this.programs.get(source);
+      compiled++;
+    }
+    this.debug.programs = this.programs.size;
+    return compiled;
+  }
+
+  /** True when every pass program of `preset` is already in the cache. */
+  isWarm(preset: StylePreset): boolean {
+    try {
+      return preset.passes.every((pass) => this.programs.has(buildFragmentSource(pass.frag)));
+    } catch {
+      return false;
+    }
   }
 
   /** Clears the canvas to black (used when no frame can be drawn yet). */
@@ -161,8 +203,11 @@ export class Compositor {
     }
 
     const { width: W, height: H } = this.internal;
-    const ctx: PassContext = { time: inputs.time, width: W, height: H, scene: inputs.scene, quality: inputs.quality };
+    const ctx: PassContext = { time: inputs.time, width: W, height: H, scene: inputs.scene, quality: inputs.quality, look: inputs.look ?? DEFAULT_LOOK };
     const passInputs = { video: this.rawVideo.texture, mask: this.mask.texture, backdrop: backdropTex };
+
+    // GPU timing brackets the draws (uploads above are excluded); results are collected on later frames.
+    this.timer.begin();
 
     // 2. Ingest: raw video → display-space video (the ONLY place mirroring happens) --------------
     const videoTarget = this.pool.acquire(W, H);
@@ -192,20 +237,23 @@ export class Compositor {
       this.drawQuad(quad.corners, quad.opacity, inputs.glitch, win.texture, overlayTex, composite, passInputs, inputs.time);
     }
 
-    // 5. Present with ONE cover-fit mapping; HUD sampled through the same mapping -------------------
+    // 5. Present with ONE fit mapping (cover or contain); HUD sampled through the same mapping ------
     const cw = gl.drawingBufferWidth;
     const ch = gl.drawingBufferHeight;
-    const fit = coverFit(videoW, videoH, cw, ch);
-    this.debug.fit = { uvScale: fit.uvScale, uvOffset: fit.uvOffset };
+    const mode: FitMode = inputs.fitMode === 'contain' ? 'contain' : 'cover';
+    const fit = fitFor(mode, videoW, videoH, cw, ch);
+    this.debug.fit = { mode, uvScale: fit.uvScale, uvOffset: fit.uvOffset };
     bindUnit(gl, TEXTURE_UNITS.u_hud, hudTex);
     this.runner.drawPass({ id: 'present', frag: PRESENT_FRAG }, composite.texture, null, passInputs, inputs.time, {
       u_fitScale: fit.uvScale,
       u_fitOffset: fit.uvOffset,
     });
 
+    this.timer.end();
     this.pool.releaseAll();
     this.passCount = this.runner.passes;
     this.debug.targets = this.pool.size;
+    this.debug.programs = this.programs.size;
   }
 
   private drawQuad(
@@ -248,6 +296,7 @@ export class Compositor {
 
   dispose(): void {
     const gl = this.gl;
+    this.timer.dispose();
     this.pool.dispose();
     this.programs.dispose();
     this.rawVideo.dispose();

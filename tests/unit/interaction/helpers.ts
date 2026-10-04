@@ -50,7 +50,7 @@ export function thumbsUpHands(): [HandTrack, HandTrack] {
 }
 
 /**
- * Crossing case (reference f01250–f01290 "bow-tie"): left hand's top is low on screen, right hand's
+ * Crossing case ("bow-tie"): left hand's top is low on screen, right hand's
  * top is high, such that top edge (L.top→R.top) and bottom edge (L.bottom→R.bottom) intersect
  * when corners are taken in the naive [L.index, R.index, R.thumb, L.thumb] order.
  */

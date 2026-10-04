@@ -1,7 +1,7 @@
 /**
- * Deployment headers (owner: W10): parses vercel.json and asserts the security headers from
- * implementation-plan.md §4 are declared for every route. The live check (`curl -I` on the
- * deployment) is done by the lead after release — this spec cannot prove the CDN serves them.
+ * Deployment headers (owner: W10): parses vercel.json and asserts the security headers documented
+ * in docs/security.md are declared for every route. Whether a server actually SENDS them is
+ * covered by production-gate.spec.ts (against `npm run serve:dist` or the live deployment).
  */
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
@@ -57,11 +57,17 @@ test('CSP allows exactly what the app needs (wasm, blob workers, mediastream) an
   expect(d['img-src']).toEqual(expect.arrayContaining(["'self'", 'data:', 'blob:']));
   expect(d['media-src']).toEqual(expect.arrayContaining(["'self'", 'blob:', 'mediastream:']));
   expect(d['font-src']).toEqual(["'self'"]);
+  // 0.2 decision (docs/security.md): no 'unsafe-inline' — the production gate recorded zero
+  // style-src violations with 'self' across the whole workflow.
+  expect(d['style-src']).toEqual(["'self'"]);
   expect(d['object-src']).toEqual(["'none'"]);
   expect(d['base-uri']).toEqual(["'self'"]);
   expect(d['frame-ancestors']).toEqual(["'none'"]);
   for (const [name, sources] of Object.entries(d)) {
-    for (const s of sources) expect(s, `${name} must not reference a third-party host`).not.toMatch(/^https?:\/\//);
+    for (const s of sources) {
+      expect(s, `${name} must not reference a third-party host`).not.toMatch(/^https?:\/\//);
+      expect(s, `${name} must not allow inline code`).not.toBe("'unsafe-inline'");
+    }
   }
 });
 

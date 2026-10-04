@@ -1,10 +1,9 @@
 /**
- * Application store (W1). Implements `AppState` from src/types/store.ts exactly.
+ * Application store. Implements `AppState` from src/types/store.ts exactly.
  *
  * - Settings are persisted through a pluggable `SettingsStorage` (memory-only by default,
- *   see persistence.ts; key `alterframe.settings.v1`, versioned envelope).
- * - `setScene` recomputes `hudTint` when `hudTintAuto` (comic → red, live → white), the
- *   behaviour observed in the reference (reference-analysis.md §2.2).
+ *   see persistence.ts; key `alterframe.settings.v2`, versioned envelope).
+ * - `setScene` recomputes `hudTint` when `hudTintAuto` (comic → red, live → white).
  * - `cyclePersona` follows `PERSONA_ORDER`.
  */
 import { create } from 'zustand';
@@ -47,6 +46,7 @@ export function nextPersona(scene: SceneState): SceneState['persona'] {
 const SETTINGS_KEYS: ReadonlyArray<keyof SettingsData> = [
   'mirrored', 'hudEnabled', 'hudTintAuto', 'showFps', 'debugLandmarks',
   'interaction', 'quality', 'adaptiveQuality', 'reducedMotion',
+  'fitMode', 'thinStripGlitch', 'look', 'capture',
 ];
 
 function pickSettings(state: AppState): SettingsData {
@@ -110,9 +110,16 @@ export function createAppStore(opts: CreateAppStoreOptions = {}): AppStore {
       sourceError: null,
       cameraDeviceId: null,
       trackerReady: false,
+      trackerProgress: 0,
+      trackerError: null,
+      windowOpen: false,
+      contextLost: false,
       fps: 0,
       recorderState: 'idle',
       recorderElapsedMs: 0,
+      countdown: null,
+      transport: null,
+      captureRequest: null,
       setSession(partial) {
         set(partial);
       },
@@ -124,7 +131,7 @@ export function createAppStore(opts: CreateAppStoreOptions = {}): AppStore {
   return store;
 }
 
-/** The single app store. Memory-only persistence (project override; see docs/handoffs/W1.md). */
+/** The single app store. Memory-only persistence (project privacy rule: no Web Storage). */
 export const useAppStore: AppStore = createAppStore();
 
 export const selectScene = (s: AppState): SceneState => s.scene;
@@ -138,6 +145,10 @@ export const selectSettings = (s: AppState): SettingsData => ({
   quality: s.quality,
   adaptiveQuality: s.adaptiveQuality,
   reducedMotion: s.reducedMotion,
+  fitMode: s.fitMode,
+  thinStripGlitch: s.thinStripGlitch,
+  look: s.look,
+  capture: s.capture,
 });
 export const selectSession = (s: AppState): Omit<SessionSlice, 'setSession'> => ({
   sourceKind: s.sourceKind,
@@ -145,7 +156,14 @@ export const selectSession = (s: AppState): Omit<SessionSlice, 'setSession'> => 
   sourceError: s.sourceError,
   cameraDeviceId: s.cameraDeviceId,
   trackerReady: s.trackerReady,
+  trackerProgress: s.trackerProgress,
+  trackerError: s.trackerError,
+  windowOpen: s.windowOpen,
+  contextLost: s.contextLost,
   fps: s.fps,
   recorderState: s.recorderState,
   recorderElapsedMs: s.recorderElapsedMs,
+  countdown: s.countdown,
+  transport: s.transport,
+  captureRequest: s.captureRequest,
 });

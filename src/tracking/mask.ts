@@ -7,7 +7,8 @@
  *   - `flipY`   → rows reversed. Kept as an escape hatch: WebGL textures are bottom-left origin
  *                 and a `readPixels` read-back is bottom-up in general, but MediaPipe 1.0.1
  *                 already compensates — measured identical orientation for the CPU and GPU paths
- *                 (see docs/handoffs/W3.md). `maskOrientationFlipY` encodes the policy.
+ *                 (same mask quadrant masses with both delegates in the Chromium run of
+ *                 src/tracking/__harness__/verify.mjs). `maskOrientationFlipY` encodes the policy.
  */
 
 export const MASK_SIZE = 256;
@@ -17,7 +18,8 @@ export type MaskFlipPolicy = 'auto' | 'always' | 'never';
 /**
  * Decide whether to flip rows.
  *
- * Measured with @mediapipe/tasks-vision 1.0.1 in Chromium (see docs/handoffs/W3.md): BOTH the CPU
+ * Measured with @mediapipe/tasks-vision 1.0.1 in Chromium (harness `verify.mjs`: a synthetic person
+ * placed in a known quadrant gives the same mask quadrant masses on both delegates): BOTH the CPU
  * path and the GPU-texture read-back path return a top-left-origin array — MediaPipe already
  * accounts for the GL bottom-left origin before `readPixels`. So 'auto' never flips; the policy
  * exists so a device that disagrees can be corrected with `maskFlipY: 'always'` without a code

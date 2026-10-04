@@ -121,6 +121,106 @@ describe('createHud', () => {
   });
 });
 
+describe('createHud — countdown dedupe', () => {
+  const cd = (secondsLeft: number, progress: number, action: 'record' | 'snapshot' = 'record') =>
+    ({ recording: false, fps: null, showFps: false, countdown: { action, secondsLeft, progress } });
+  const dirty = (canvas: HudCanvasLike) => (canvas as { __dirty?: boolean }).__dirty;
+
+  it('draws the countdown with no quad and marks the canvas dirty', () => {
+    const { canvas, calls } = fakeCanvas();
+    const hud = createHud({ createCanvas: () => canvas });
+    hud.resize({ width: 1280, height: 720 });
+    hud.draw(hud.buildModel(null, null, LIVE_SCENE, 0, cd(3, 0)));
+    const text = calls.filter((c) => c.op === 'fillText').map((c) => c.args[0]).join('');
+    expect(text).toContain('3');
+    expect(text).toContain('RECORDING IN');
+    expect(dirty(canvas)).toBe(true);
+  });
+
+  it('does not redraw while secondsLeft and the 5 % progress bucket are unchanged', () => {
+    const { canvas, calls } = fakeCanvas();
+    const hud = createHud({ createCanvas: () => canvas });
+    hud.resize({ width: 1280, height: 720 });
+    hud.draw(hud.buildModel(null, null, LIVE_SCENE, 0, cd(3, 0.10)));
+    expect(calls.some((c) => c.op === 'fillText' && c.args[0] === '3')).toBe(true);
+    const n = calls.length;
+    hud.draw(hud.buildModel(null, null, LIVE_SCENE, 16, cd(3, 0.12)));
+    hud.draw(hud.buildModel(null, null, LIVE_SCENE, 33, cd(3, 0.11)));
+    expect(calls.length).toBe(n);
+    expect(dirty(canvas)).toBe(false);
+  });
+
+  it('redraws once the next second arrives', () => {
+    const { canvas, calls } = fakeCanvas();
+    const hud = createHud({ createCanvas: () => canvas });
+    hud.resize({ width: 1280, height: 720 });
+    hud.draw(hud.buildModel(null, null, LIVE_SCENE, 0, cd(3, 0.30)));
+    const n = calls.length;
+    hud.draw(hud.buildModel(null, null, LIVE_SCENE, 1000, cd(2, 0.30)));
+    expect(calls.length).toBeGreaterThan(n);
+    expect(dirty(canvas)).toBe(true);
+    expect(calls.filter((c) => c.op === 'fillText').map((c) => c.args[0]).join('')).toMatch(/2RECORDING IN$/);
+  });
+
+  it('redraws when progress crosses a 5 % bucket (the ring advances)', () => {
+    const { canvas, calls } = fakeCanvas();
+    const hud = createHud({ createCanvas: () => canvas });
+    hud.resize({ width: 1280, height: 720 });
+    hud.draw(hud.buildModel(null, null, LIVE_SCENE, 0, cd(3, 0.10)));
+    const n = calls.length;
+    hud.draw(hud.buildModel(null, null, LIVE_SCENE, 0, cd(3, 0.20)));
+    expect(calls.length).toBeGreaterThan(n);
+  });
+
+  it('redraws when the action changes and when the countdown ends', () => {
+    const { canvas, calls } = fakeCanvas();
+    const hud = createHud({ createCanvas: () => canvas });
+    hud.resize({ width: 1280, height: 720 });
+    hud.draw(hud.buildModel(null, null, LIVE_SCENE, 0, cd(3, 0.1, 'record')));
+    const n1 = calls.length;
+    hud.draw(hud.buildModel(null, null, LIVE_SCENE, 0, cd(3, 0.1, 'snapshot')));
+    const n2 = calls.length;
+    expect(n2).toBeGreaterThan(n1);
+    expect(calls.filter((c) => c.op === 'fillText').map((c) => c.args[0]).join('')).toMatch(/SNAPSHOT IN$/);
+    hud.draw(hud.buildModel(null, null, LIVE_SCENE, 0, NO_EXTRAS));
+    expect(calls.length).toBeGreaterThan(n2);
+    expect(calls.slice(n2).some((c) => c.op === 'fillText')).toBe(false);
+  });
+});
+
+describe('createHud — dwell ring dedupe', () => {
+  const dw = (dwellProgress: number) => ({ recording: false, fps: null, showFps: false, dwellProgress });
+  const arcs = (calls: { op: string }[]) => calls.filter((c) => c.op === 'arc').length;
+
+  it('does not redraw while progress stays inside the same 5 % bucket', () => {
+    const { canvas, calls } = fakeCanvas();
+    const hud = createHud({ createCanvas: () => canvas });
+    hud.resize({ width: 1280, height: 720 });
+    hud.draw(hud.buildModel(null, makeQuad(), LIVE_SCENE, 0, dw(0.10)));
+    expect(arcs(calls)).toBe(1);
+    const n = calls.length;
+    hud.draw(hud.buildModel(null, makeQuad(), LIVE_SCENE, 16, dw(0.12)));
+    hud.draw(hud.buildModel(null, makeQuad(), LIVE_SCENE, 33, dw(0.11)));
+    expect(calls.length).toBe(n);
+    expect((canvas as { __dirty?: boolean }).__dirty).toBe(false);
+  });
+
+  it('redraws when the bucket changes and again when the ring disappears', () => {
+    const { canvas, calls } = fakeCanvas();
+    const hud = createHud({ createCanvas: () => canvas });
+    hud.resize({ width: 1280, height: 720 });
+    hud.draw(hud.buildModel(null, makeQuad(), LIVE_SCENE, 0, dw(0.10)));
+    const n1 = calls.length;
+    hud.draw(hud.buildModel(null, makeQuad(), LIVE_SCENE, 16, dw(0.20)));
+    const n2 = calls.length;
+    expect(n2).toBeGreaterThan(n1);
+    expect(arcs(calls.slice(n1))).toBe(1);
+    hud.draw(hud.buildModel(null, makeQuad(), LIVE_SCENE, 33, dw(0)));
+    expect(calls.length).toBeGreaterThan(n2);
+    expect(arcs(calls.slice(n2))).toBe(0);
+  });
+});
+
 describe('createHud — font warm-up', () => {
   it('forces one redraw after the HUD font finishes loading', async () => {
     const { canvas, calls } = fakeCanvas();

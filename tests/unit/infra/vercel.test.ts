@@ -40,10 +40,14 @@ describe('vercel.json', () => {
     expect(g['cross-origin-opener-policy']).toBe('same-origin');
   });
 
-  it('CSP has no third-party hosts and no unsafe-eval (wasm-unsafe-eval only)', () => {
+  it('CSP has no third-party hosts, no unsafe-eval (wasm-unsafe-eval only) and no unsafe-inline anywhere', () => {
     const csp = h('/(.*)')['content-security-policy']!;
     expect(csp).not.toMatch(/https?:\/\//);
     expect(csp).not.toMatch(/'unsafe-eval'/);
+    // Decision 0.2 (docs/security.md): the built app needs no inline styles — React writes styles
+    // through the CSSOM and the font faces live in the bundled stylesheet — so style-src is 'self'.
+    expect(csp).toContain("style-src 'self';");
+    expect(csp).not.toMatch(/'unsafe-inline'/);
   });
 
   it('immutable caching is restricted to content-hashed /assets', () => {

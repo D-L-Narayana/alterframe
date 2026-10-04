@@ -8,10 +8,13 @@
  *    static (true paper fibre does not move); for comic it is re-seeded per frame at
  *    ~12 Hz so recordings get a subtle film flicker without a 60 Hz buzz.
  *
+ * Look: `look.grain` multiplies the grain amplitude (0 = clean, 1 = authored 3 %). Contrast,
+ * vignette and lift are fixed per variant.
+ *
  * Both variants are orientation-agnostic. Cost: 1 fetch.
  */
 import type { PassContext, StylePass } from '../../types/render';
-import { glsl, HASH, type Uniforms } from './glsl';
+import { glsl, HASH, lookFactor, type Uniforms } from './glsl';
 
 const FRAG = glsl`
 uniform float u_contrast;  // contrast gain around mid grey
@@ -40,7 +43,8 @@ function makeUniforms(variant: 'paper' | 'comic') {
   return (ctx: PassContext): Uniforms => ({
     u_contrast: variant === 'paper' ? 1.04 : 1.15,
     u_vignette: variant === 'paper' ? 0.08 : 0.22,
-    u_grain: 0.03,
+    // Authored amplitude × the look multiplier; 1 → 0.03 exactly.
+    u_grain: 0.03 * lookFactor(ctx.look, 'grain'),
     // Static for paper; re-seeded at 12 Hz for comic (deterministic from time).
     u_grainSeed: variant === 'paper' ? 17.0 : Math.floor(ctx.time * 12) * 7.13,
     u_lift: variant === 'paper' ? 0.04 : 0.02,

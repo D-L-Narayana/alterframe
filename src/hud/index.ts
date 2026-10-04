@@ -1,25 +1,26 @@
 /**
- * W8 — HUD callouts overlay.
+ * HUD callouts overlay.
  *
  * Public API:
  *   createHud(opts?) → Hud & { setOptions(), options }
  *   buildHudModel()  (pure, ./model)   drawHud() (./draw)   codePrefix() (./code)
  *
- * The HUD owns one RGBA canvas (OffscreenCanvas when available) that W4 composites
- * last. `buildModel` is pure; `draw` only touches the canvas when the model's
- * visible content changed, and flips `canvas.__dirty` so W4 can skip the upload.
+ * The HUD owns one RGBA canvas (OffscreenCanvas when available) that the compositor
+ * samples last. `buildModel` is pure; `draw` only touches the canvas when the model's
+ * visible content changed, and flips `canvas.__dirty` so the compositor can skip the upload.
  */
-import type { DirtyCanvas, Hud, HudModel, SceneState, Size, TrackingFrame, WindowQuad } from '@/types';
-import { buildHudModel, type BuildExtras, type HudModelExt } from './model';
-import { drawHud, type DebugDrawFn, type Hud2D } from './draw';
+import type { DirtyCanvas, Hud, HudExtras, HudModel, SceneState, Size, TrackingFrame, WindowQuad } from '@/types';
+import { buildHudModel, isHudModelExt, type HudModelExt } from './model';
+import { drawHud, dwellRingBucket, type DebugDrawFn, type Hud2D } from './draw';
 import { drawDebugLandmarks } from './debugDraw';
-import { BLINK_PERIOD_MS } from './layout';
+import { BLINK_PERIOD_MS, countdownText, progressBucket } from './layout';
 
 export { buildHudModel, EYE_RIGHT_MIN_AREA, MOUTH_OPEN_BOX_THRESHOLD, MOUTH_BOX_WIDTH_FACTOR } from './model';
 export type { HudModelExt, HudBox, BuildExtras } from './model';
 export { drawHud, HUD_COLORS, HUD_FONT_STACK } from './draw';
 export type { DebugDrawFn, DrawOptions, Hud2D } from './draw';
 export { codePrefix, buildCode, CODE_SUFFIX, PREFIX_PERIOD_MS } from './code';
+export { COUNTDOWN_LABELS } from './layout';
 export { drawDebugLandmarks } from './debugDraw';
 export * as hudLayout from './layout';
 
@@ -36,7 +37,7 @@ export interface HudOptions {
   reducedMotion?: boolean;
   /** Draw tracking landmarks after the HUD (dev). Default false. */
   debugLandmarks?: boolean;
-  /** Landmark drawer — pass W7's `drawLandmarks`; defaults to W8's own minimal drawer. */
+  /** Landmark drawer — pass the interaction module's `drawLandmarks`; defaults to this module's minimal drawer. */
   debugDraw?: DebugDrawFn;
   /** Seed for the deterministic code prefix. Default 0. */
   seed?: number;
@@ -47,7 +48,7 @@ export interface HudOptions {
   /**
    * Font loader (defaults to `document.fonts` when present). The HUD draws with the
    * fallback face until Inter is ready, then forces one redraw so no frame is stuck
-   * on the system font (lead checklist B.17).
+   * on the system font.
    */
   fonts?: { load(font: string): Promise<unknown> } | null;
 }
@@ -75,7 +76,10 @@ function prefersReducedMotion(): boolean {
 /**
  * Cheap structural signature of what will end up on the canvas. Two models with
  * the same key draw identically, so the second draw is skipped. Blink phase is
- * folded in only while recording without reduced motion.
+ * folded in only while recording without reduced motion; the countdown contributes
+ * its action, the drawn numeral and the progress quantized to 5 %, so the numeral
+ * redraws once per second rather than every frame; the hold-still ring contributes
+ * its 5 % bucket only while it is actually drawn.
  */
 function modelKey(m: HudModelExt, size: Size, reducedMotion: boolean, debug: boolean): string {
   const parts: (string | number)[] = [size.width, size.height, m.tint, m.opacity.toFixed(3), m.recording ? 1 : 0, m.fps === null ? 'n' : Math.round(m.fps)];
@@ -86,10 +90,27 @@ function modelKey(m: HudModelExt, size: Size, reducedMotion: boolean, debug: boo
     parts.push(c.bracket ? 'b' : '-');
   }
   for (const b of m.boxes) parts.push('box', b.center.x.toFixed(4), b.center.y.toFixed(4), b.w.toFixed(4), b.h.toFixed(4));
+  const numeral = m.countdown ? countdownText(m.countdown.secondsLeft) : '';
+  if (m.countdown && numeral) parts.push('cd', m.countdown.action, numeral, progressBucket(m.countdown.progress));
+  const dwell = dwellRingBucket(m);
+  if (dwell > 0) parts.push('dwell', dwell);
   if (m.recording && !reducedMotion) parts.push('blink', Math.floor(((m.t % BLINK_PERIOD_MS) + BLINK_PERIOD_MS) % BLINK_PERIOD_MS / (BLINK_PERIOD_MS / 2)));
   // Debug overlay changes with every frame; never dedupe while it is on.
   if (debug && m.debugFrame) parts.push('dbg', m.debugFrame.t, Math.random());
   return parts.join('|');
+}
+
+/** Promote a plain contract model to the extended shape `drawHud` and `modelKey` work on. */
+function toExt(model: HudModel): HudModelExt {
+  if (isHudModelExt(model)) return model;
+  return {
+    ...model,
+    t: 0,
+    boxes: model.boxes ?? [],
+    countdown: model.countdown ?? null,
+    dwellProgress: model.dwellProgress ?? null,
+    debugFrame: null,
+  };
 }
 
 export function createHud(opts: HudOptions = {}): HudHandle {
@@ -135,13 +156,13 @@ export function createHud(opts: HudOptions = {}): HudHandle {
       lastKey = '';     // force redraw
     },
 
-    buildModel(frame: TrackingFrame | null, quad: WindowQuad | null, scene: SceneState, t: number, extras: BuildExtras): HudModelExt {
+    buildModel(frame: TrackingFrame | null, quad: WindowQuad | null, scene: SceneState, t: number, extras: HudExtras): HudModelExt {
       return buildHudModel(frame, quad, scene, t, extras, state.seed);
     },
 
     draw(model: HudModel): void {
       if (!(size.width > 0 && size.height > 0)) return;
-      const ext: HudModelExt = 'boxes' in model ? (model as HudModelExt) : { ...model, t: 0, boxes: [], debugFrame: null };
+      const ext = toExt(model);
       const key = modelKey(ext, size, state.reducedMotion, state.debugLandmarks);
       if (key === lastKey) { canvas.__dirty = false; return; }
       const c = getCtx();

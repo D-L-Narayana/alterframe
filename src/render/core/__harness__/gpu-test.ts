@@ -1,11 +1,13 @@
 /**
  * GPU test harness for tests/unit/render-core/gpu.test.ts (Playwright drives this page on a real
  * WebGL2 context). Builds a RenderInputs from a serialisable SceneSpec, renders N frames and reads
- * back probe pixels. Not imported by the app.
+ * back probe pixels. Not imported by the app. The real style presets are imported only so the
+ * warm-up test can compile the shipped chains.
  */
-import type { QuadCorners, RenderInputs, SegmentationResult, StylePass, StylePreset, WindowQuad } from '@/types';
+import type { FitMode, QuadCorners, RenderInputs, SegmentationResult, StylePass, StylePreset, WindowQuad } from '@/types';
 import { DEFAULT_QUALITY, DEFAULT_SCENE } from '@/types';
-import { canvasPxToDisplay, compilePass, coverFit, createRenderer, displayToCanvasPx, passthrough, presetOf, solid, type CoreRenderer } from '../index';
+import { STYLE_PRESETS } from '@/render/styles';
+import { canvasPxToDisplay, compilePass, createRenderer, displayToCanvasPx, fitFor, passthrough, presetOf, solid, type CoreRenderer } from '../index';
 
 type Rgb = [number, number, number];
 
@@ -22,10 +24,13 @@ export interface LayerSpec {
 }
 
 export type PassSpec = 'passthrough' | { solid: Rgb } | { frag: string; scale?: number; id?: string };
-export type StyleSpec = 'live' | PassSpec | { chain: PassSpec[] };
+/** `{ preset }` runs one of the real style presets (src/render/styles.ts). */
+export type StyleSpec = 'live' | PassSpec | { chain: PassSpec[] } | { preset: keyof typeof STYLE_PRESETS };
 
 export interface SceneSpec {
   css?: { w: number; h: number; dpr?: number };
+  /** Present-pass mapping (default 'cover', the v0.1 behaviour). */
+  fitMode?: FitMode;
   video?: { w: number; h: number; pattern: 'halves' | 'quadrants' | 'solid' | 'dot'; color?: string; dot?: Dot };
   mirrored?: boolean;
   quad?: QuadCorners | null;
@@ -52,15 +57,36 @@ export interface SceneSpec {
 export interface SceneResult {
   backing: { w: number; h: number };
   internal: { w: number; h: number };
-  fit: { uvScale: [number, number]; uvOffset: [number, number] };
+  fit: { mode: FitMode; uvScale: [number, number]; uvOffset: [number, number] };
   probes: [number, number, number, number][];
   probesPx: [number, number, number, number][];
   probePx: { x: number; y: number }[];
-  stats: { lastFrameMs: number; passes: number };
+  stats: { lastFrameMs: number; passes: number; gpuMs: number | null };
   uploads: { video: number; overlay: number; mask: number; skippedOverlay: number };
   maskFormat: string;
+  /** Linked programs in the compositor's cache after this run. */
+  programs: number;
+  /** Whether the timer-query extension exists on this context. */
+  gpuTimer: boolean;
+  /** gl.getError() after the run (0 = NO_ERROR). */
+  glError: number;
   contextLost: boolean;
   contextLossCount: number;
+}
+
+export interface WarmResult {
+  /** Programs in the cache before/after the warm-up. */
+  programsBefore: number;
+  programsAfter: number;
+  /** Distinct pass fragment sources across the warmed presets (= programs the warm-up must add). */
+  distinctPasses: number;
+  /** `isWarm()` for every preset before the call / after the queue drained. */
+  warmBefore: boolean;
+  allWarm: boolean;
+  /** Presets still queued right after `warm()` returned (0 = ran synchronously). */
+  pendingAfterCall: number;
+  /** gl.getError() after the warm-up drained (0 = NO_ERROR). */
+  glError: number;
 }
 
 export interface W4Harness {
@@ -74,6 +100,10 @@ export interface W4Harness {
   rerenderOverlay(dirty: boolean | undefined): SceneResult;
   readPixel(x: number, y: number): [number, number, number, number];
   display(p: { x: number; y: number }): { x: number; y: number };
+  /** `renderer.warm()` with every real style preset (twice, to prove idempotence); resolves when the queue drained. */
+  warmAll(): Promise<WarmResult>;
+  /** Render the last spec `frames` more times (over animation frames) and report the stats. */
+  pump(frames: number): Promise<{ gpuMs: number | null; gpuTimer: boolean; extensionPresent: boolean; passes: number }>;
 }
 
 declare global {
@@ -149,6 +179,7 @@ function passOf(spec: PassSpec): StylePass {
 
 function styleOf(spec: StyleSpec | undefined, id: StylePreset['id']): StylePreset | null {
   if (!spec || spec === 'live') return null;
+  if (typeof spec === 'object' && 'preset' in spec) return STYLE_PRESETS[spec.preset];
   if (typeof spec === 'object' && 'chain' in spec) return presetOf(spec.chain.map(passOf), id);
   return presetOf([passOf(spec)], id);
 }
@@ -188,6 +219,8 @@ async function main(): Promise<void> {
     rerenderOverlay: () => { throw new Error('not ready'); },
     readPixel: () => [0, 0, 0, 0],
     display: (p) => p,
+    warmAll: () => Promise.reject(new Error('not ready')),
+    pump: () => Promise.reject(new Error('not ready')),
   };
   window.__w4 = api;
   const stage = document.getElementById('stage') as HTMLCanvasElement;
@@ -215,18 +248,24 @@ async function main(): Promise<void> {
     const dbg = r.getDebug();
     const vw = spec.video?.w ?? 640;
     const vh = spec.video?.h ?? 360;
-    const fit = coverFit(vw, vh, stage.width, stage.height);
+    const mode: FitMode = spec.fitMode ?? 'cover';
+    // Probe positions go through the same pure mapping the compositor uses for this mode.
+    const fit = fitFor(mode, vw, vh, stage.width, stage.height);
     const probePx = (spec.probes ?? []).map((p) => displayToCanvasPx(p, stage.width, stage.height, fit));
+    const gl = r.gl;
     return {
       backing: { w: stage.width, h: stage.height },
       internal: { w: dbg?.internalWidth ?? 0, h: dbg?.internalHeight ?? 0 },
-      fit: dbg?.fit ?? { uvScale: fit.uvScale, uvOffset: fit.uvOffset },
+      fit: dbg?.fit ?? { mode, uvScale: fit.uvScale, uvOffset: fit.uvOffset },
       probes: probePx.map((p) => readPixel(p.x, p.y)),
       probesPx: (spec.probesPx ?? []).map((p) => readPixel(p.x, p.y)),
       probePx,
       stats: { ...r.stats },
       uploads: dbg ? { ...dbg.uploads } : { video: 0, overlay: 0, mask: 0, skippedOverlay: 0 },
       maskFormat: dbg?.maskFormat ?? 'none',
+      programs: dbg?.programs ?? 0,
+      gpuTimer: dbg?.gpuTimer ?? false,
+      glError: gl && !gl.isContextLost() ? gl.getError() : 0,
       contextLost: r.contextLost,
       contextLossCount: r.contextLossCount,
     };
@@ -258,6 +297,7 @@ async function main(): Promise<void> {
       hudOverlay: spec.hud ? layerCanvas(spec.hud, videoSpec.w, videoSpec.h) : null,
       glitch: spec.glitch ?? 0,
       quality: { ...DEFAULT_QUALITY, renderScale: spec.renderScale ?? 1 },
+      fitMode: spec.fitMode ?? 'cover',
       time: spec.time ?? 0,
     };
     const frames = spec.frames ?? 1;
@@ -273,7 +313,32 @@ async function main(): Promise<void> {
     api.run = render;
     api.readPixel = readPixel;
     api.compile = (frag) => compilePass({ id: 'test', frag }, renderer!.gl);
-    api.display = (p) => canvasPxToDisplay(p, stage.width, stage.height, coverFit(lastInputs?.videoWidth ?? 640, lastInputs?.videoHeight ?? 360, stage.width, stage.height));
+    api.display = (p) => canvasPxToDisplay(p, stage.width, stage.height, fitFor(lastInputs?.fitMode ?? 'cover', lastInputs?.videoWidth ?? 640, lastInputs?.videoHeight ?? 360, stage.width, stage.height));
+    api.warmAll = async () => {
+      const r = renderer!;
+      const gl = r.gl!;
+      const presets = Object.values(STYLE_PRESETS);
+      const distinctPasses = new Set(presets.flatMap((p) => p.passes.map((pass) => pass.frag))).size;
+      const programsBefore = r.getDebug()?.programs ?? 0;
+      const warmBefore = presets.every((p) => r.isWarm(p));
+      r.warm(presets);
+      r.warm(presets); // idempotent: the second call must not duplicate work
+      const pendingAfterCall = r.warmPending;
+      for (let i = 0; i < 400 && r.warmPending > 0; i++) await new Promise((res) => setTimeout(res, 25));
+      const allWarm = presets.every((p) => r.isWarm(p));
+      return { programsBefore, programsAfter: r.getDebug()?.programs ?? 0, distinctPasses, warmBefore, allWarm, pendingAfterCall, glError: gl.getError() };
+    };
+    api.pump = async (frames) => {
+      if (!lastInputs) throw new Error('nothing rendered yet');
+      const r = renderer!;
+      for (let i = 0; i < frames; i++) {
+        // Separate tasks: timer-query results only become available in a later task than endQuery.
+        await new Promise((res) => setTimeout(res, 16));
+        r.render({ ...lastInputs, time: lastInputs.time + (i + 1) / 60 });
+      }
+      const extensionPresent = r.gl!.getExtension('EXT_disjoint_timer_query_webgl2') !== null;
+      return { gpuMs: r.stats.gpuMs, gpuTimer: r.getDebug()?.gpuTimer ?? false, extensionPresent, passes: r.stats.passes };
+    };
     api.rerenderOverlay = (dirty) => {
       if (!lastInputs || !lastSpec) throw new Error('nothing rendered yet');
       if (overlayCanvas) {

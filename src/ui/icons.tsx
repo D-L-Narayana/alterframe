@@ -29,6 +29,7 @@ export const MirrorIcon = (p: P) => (
   <svg {...base(p)}><path d="M12 3v18" strokeDasharray="2 3" /><path d="M9 7L4 12l5 5V7zM15 7l5 5-5 5V7z" /></svg>
 );
 export const PlayIcon = (p: P) => (<svg {...base(p)}><path d="M7 5v14l11-7z" fill="currentColor" /></svg>);
+export const PauseIcon = (p: P) => (<svg {...base(p)}><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none" /><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor" stroke="none" /></svg>);
 export const HudIcon = (p: P) => (
   <svg {...base(p)}><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" /><path d="M9 12h6" /></svg>
 );

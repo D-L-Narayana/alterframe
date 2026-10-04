@@ -1,4 +1,4 @@
-import type { CaptureAspect, Recorder, RecorderOptions, RecorderState } from '@/types/capture';
+import type { CaptureAspect, Recorder, RecorderOptions, RecorderState, SnapshotOptions } from '@/types/capture';
 import { computeCrop, type CropPlan } from './crop';
 import { DEFAULT_MIME_CANDIDATES, pickMime } from './mime';
 import { snapshot, type SnapshotDeps } from './snapshot';
@@ -56,7 +56,10 @@ export interface RecorderDeps extends SnapshotDeps {
   now?: () => number;
   requestFrame?: (cb: () => void) => number;
   cancelFrame?: (id: number) => void;
-  /** Called on every state transition (W2 mirrors this into the store). */
+  /**
+   * Called on every state transition (the runtime mirrors this into the store). When the transition
+   * to `idle` comes from a self-finalize (maxDurationMs), `hasPendingResult` already reads true.
+   */
   onStateChange?: (state: RecorderState, elapsedMs: number) => void;
   /** MediaRecorder timeslice; chunks arrive periodically so memory is bounded per chunk. Default 1000. */
   timesliceMs?: number;
@@ -68,6 +71,18 @@ export interface RecordingResult {
   blob: Blob;
   mime: string;
   durationMs: number;
+}
+
+/** Hard cap on one recording when `RecorderOptions.maxDurationMs` is omitted (10 minutes). */
+export const DEFAULT_MAX_DURATION_MS = 600_000;
+
+/** One finalize in flight (state `finalizing`), shared by user stops and the max-duration timer. */
+interface FinalizeJob {
+  promise: Promise<RecordingResult>;
+  resolve: (result: RecordingResult) => void;
+  reject: (error: Error) => void;
+  /** True once a `stop()` call is waiting for this job (always true for user-initiated stops). */
+  joined: boolean;
 }
 
 function defaultMediaRecorder(): MediaRecorderCtor | undefined {
@@ -94,6 +109,11 @@ function containerOf(mime: string): string {
  * Canvas recorder. Records the composited stage canvas via `captureStream` + `MediaRecorder`.
  * For non-`source` aspects the frames are centre-cropped into an intermediate canvas on every
  * animation frame (see `computeCrop`) and that canvas is the recorded stream.
+ *
+ * Max duration: `start({ maxDurationMs })` (default 600 000 ms) arms a timer that finalizes the
+ * recording through the same path as `stop()`. If no `stop()` is waiting at that moment the result
+ * is held (`hasPendingResult`) and handed out by the next `stop()` exactly once; `start()` refuses
+ * to record over an uncollected result.
  */
 export function createRecorder(getCanvas: () => HTMLCanvasElement, deps: RecorderDeps = {}): Recorder {
   const MR = 'MediaRecorder' in deps ? deps.MediaRecorder : defaultMediaRecorder();
@@ -113,7 +133,10 @@ export function createRecorder(getCanvas: () => HTMLCanvasElement, deps: Recorde
   let stream: MediaStreamLike | null = null;
   let cropCanvas: CanvasLike | null = null;
   let rafId: number | null = null;
-  let pendingStop: Promise<RecordingResult> | null = null;
+  let capTimer: ReturnType<typeof setTimeout> | null = null;
+  let finalizing: FinalizeJob | null = null;
+  /** Result of a self-finalized recording (maxDurationMs) that no `stop()` has collected yet. */
+  let pendingResult: RecordingResult | null = null;
   let lastError: Error | null = null;
 
   function setState(next: RecorderState) {
@@ -127,8 +150,27 @@ export function createRecorder(getCanvas: () => HTMLCanvasElement, deps: Recorde
     return 0;
   }
 
-  /** Stop tracks, cancel the crop loop, release the crop canvas, forget the recorder. */
+  function clearCapTimer() {
+    if (capTimer !== null) {
+      clearTimeout(capTimer);
+      capTimer = null;
+    }
+  }
+
+  /** Arm the max-duration timer. 0, negative or non-finite caps mean "no cap". */
+  function armCapTimer(maxDurationMs: number | undefined) {
+    clearCapTimer();
+    const cap = maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
+    if (!Number.isFinite(cap) || cap <= 0) return;
+    capTimer = setTimeout(() => {
+      capTimer = null;
+      if (state === 'recording' && rec) finalize(rec, true);
+    }, cap);
+  }
+
+  /** Stop tracks, cancel the crop loop and cap timer, release the crop canvas, forget the recorder. */
   function cleanup() {
+    clearCapTimer();
     if (rafId !== null) {
       cancelFrame(rafId);
       rafId = null;
@@ -173,6 +215,7 @@ export function createRecorder(getCanvas: () => HTMLCanvasElement, deps: Recorde
   async function start(opts: RecorderOptions): Promise<void> {
     if (state === 'recording') throw new Error('Recorder is already recording.');
     if (state === 'finalizing') throw new Error('Recorder is still finalizing the previous recording.');
+    if (pendingResult) throw new Error('A finished recording is waiting to be saved; collect the previous recording with stop() first.');
     if (!MR) throw new Error('MediaRecorder is not supported in this browser; recording is unavailable.');
 
     const candidates = opts.mimeCandidates ?? DEFAULT_MIME_CANDIDATES;
@@ -224,7 +267,7 @@ export function createRecorder(getCanvas: () => HTMLCanvasElement, deps: Recorde
           cleanup();
           setState('idle');
         }
-        // If finalizing, the pending stop() promise observes `lastError` via the stop handler.
+        // If finalizing, the in-flight job observes `lastError` in its finish handler.
       });
       try {
         current.start(timesliceMs);
@@ -236,11 +279,81 @@ export function createRecorder(getCanvas: () => HTMLCanvasElement, deps: Recorde
       throw e;
     }
     startedAt = now();
+    armCapTimer(opts.maxDurationMs);
     setState('recording');
   }
 
+  /**
+   * Shared by `stop()` and the max-duration timer: freeze the duration, ask the MediaRecorder to
+   * stop and, once its final chunk arrived (or `stopTimeoutMs` passed), assemble the Blob.
+   * `self` marks a timer-triggered finalize; if no `stop()` joins it before it completes, the
+   * outcome is parked for the next `stop()` instead of settling a promise nobody awaits.
+   */
+  function finalize(current: MediaRecorderLike, self: boolean): FinalizeJob {
+    clearCapTimer();
+    frozenDuration = now() - startedAt;
+    setState('finalizing');
+    const durationMs = frozenDuration;
+
+    let resolve!: (result: RecordingResult) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<RecordingResult>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    const job: FinalizeJob = { promise, resolve, reject, joined: !self };
+    finalizing = job;
+
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const collected = chunks;
+      let failure: Error | null = lastError;
+      lastError = null;
+      cleanup();
+      finalizing = null;
+      let result: RecordingResult | null = null;
+      if (!failure) {
+        const blob = new Blob(collected, { type: containerOf(mime) });
+        if (blob.size === 0) failure = new Error('Recording produced no data (the canvas may have been hidden or the stream ended).');
+        else result = { blob, mime, durationMs };
+      }
+      if (job.joined) {
+        setState('idle');
+        if (result) job.resolve(result);
+        else job.reject(failure ?? new Error('Recording failed.'));
+      } else {
+        // Self-finalized with nobody waiting: park the outcome. `hasPendingResult` must already read
+        // true when the `idle` transition is observed, so set it before `setState`.
+        if (result) pendingResult = result;
+        else lastError = failure;
+        setState('idle');
+      }
+    };
+    const timer = setTimeout(finish, stopTimeoutMs);
+    current.addEventListener('stop', finish);
+    try {
+      if (current.state !== 'inactive') current.stop();
+      else queueMicrotask(finish);
+    } catch (e) {
+      lastError = new Error(`Recording failed: ${errorMessage(e)}`);
+      finish();
+    }
+    return job;
+  }
+
   function stop(): Promise<RecordingResult> {
-    if (state === 'finalizing' && pendingStop) return pendingStop;
+    if (state === 'finalizing' && finalizing) {
+      finalizing.joined = true;
+      return finalizing.promise;
+    }
+    if (pendingResult) {
+      const result = pendingResult;
+      pendingResult = null;
+      return Promise.resolve(result);
+    }
     if (state !== 'recording' || !rec) {
       if (lastError) {
         const err = lastError;
@@ -249,45 +362,7 @@ export function createRecorder(getCanvas: () => HTMLCanvasElement, deps: Recorde
       }
       return Promise.reject(new Error('Not recording.'));
     }
-    frozenDuration = now() - startedAt;
-    setState('finalizing');
-    const current = rec;
-    const durationMs = frozenDuration;
-
-    pendingStop = new Promise<RecordingResult>((resolve, reject) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        const collected = chunks;
-        const err = lastError;
-        lastError = null;
-        cleanup();
-        pendingStop = null;
-        setState('idle');
-        if (err) {
-          reject(err);
-          return;
-        }
-        const blob = new Blob(collected, { type: containerOf(mime) });
-        if (blob.size === 0) {
-          reject(new Error('Recording produced no data (the canvas may have been hidden or the stream ended).'));
-          return;
-        }
-        resolve({ blob, mime, durationMs });
-      };
-      const timer = setTimeout(finish, stopTimeoutMs);
-      current.addEventListener('stop', finish);
-      try {
-        if (current.state !== 'inactive') current.stop();
-        else queueMicrotask(finish);
-      } catch (e) {
-        lastError = new Error(`Recording failed: ${errorMessage(e)}`);
-        finish();
-      }
-    });
-    return pendingStop;
+    return finalize(rec, false).promise;
   }
 
   return {
@@ -297,9 +372,12 @@ export function createRecorder(getCanvas: () => HTMLCanvasElement, deps: Recorde
     get elapsedMs() {
       return elapsed();
     },
+    get hasPendingResult() {
+      return pendingResult !== null;
+    },
     start,
     stop,
-    snapshot: (aspect) => snapshot(getCanvas(), aspect, deps),
+    snapshot: (aspect: CaptureAspect, opts?: SnapshotOptions) => snapshot(getCanvas(), aspect, opts ? { ...deps, ...opts } : deps),
   };
 }
 

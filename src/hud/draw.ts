@@ -1,8 +1,9 @@
-import type { HudCallout, HudModel, HudTint, Size, TrackingFrame, Vec2 } from '@/types';
-import type { HudBox, HudModelExt } from './model';
+import type { HudBox, HudCallout, HudCountdown, HudModel, HudTint, Size, TrackingFrame, Vec2 } from '@/types';
+import { isHudModelExt, type HudModelExt } from './model';
 import {
-  BRACKET_SIZE_PX, EDGE_PAD_PX, RECORD_DOT_PX, TRACKING_EM, blinkOn, bracketSegments, fpsBadgeText,
-  hudFontPx, placeLabel, toPx, trackedWidth, clampToBounds,
+  BRACKET_SIZE_PX, COUNTDOWN_ALPHA, COUNTDOWN_LABELS, EDGE_PAD_PX, RECORD_DOT_PX, RING_LINE_PX, RING_START_ANGLE, TRACKING_EM,
+  arcEndAngle, blinkOn, bracketSegments, clampToBounds, countdownLayout, countdownText, dwellRingRadiusPx, fpsBadgeText, hudFontPx,
+  placeLabel, progressBucket, toPx, trackedWidth,
 } from './layout';
 
 /** Subset of CanvasRenderingContext2D the HUD uses (also satisfied by OffscreenCanvasRenderingContext2D and test fakes). */
@@ -43,7 +44,7 @@ export interface DrawOptions {
   reducedMotion: boolean;
   /** When true and a debug frame is on the model, `debugDraw` is invoked after the HUD. */
   debugLandmarks?: boolean;
-  /** W7's `drawLandmarks` (or any compatible function); nothing is drawn when absent. */
+  /** The interaction module's `drawLandmarks` (or any compatible function); nothing is drawn when absent. */
   debugDraw?: DebugDrawFn | undefined;
   /** Override font family (tests / harness). */
   fontFamily?: string;
@@ -53,10 +54,8 @@ export const HUD_COLORS: Record<HudTint, string> = { white: '#f5f5f7', red: '#ff
 export const RECORD_RED = '#ff2b2b';
 export const SHADOW_COLOR = 'rgba(0,0,0,.35)';
 export const SHADOW_BLUR_PX = 2;
-/** Inter first (W1 bundles it), then platform UI faces so the HUD never falls back to a serif. */
+/** Inter first (bundled by the app shell), then platform UI faces so the HUD never falls back to a serif. */
 export const HUD_FONT_STACK = 'Inter, "Inter Variable", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
-
-const isExt = (m: HudModel | HudModelExt): m is HudModelExt => 'boxes' in m && 't' in m;
 
 /** Snap to the pixel centre so 1 px strokes render crisp instead of a 2 px grey smear. */
 const crisp = (v: number) => Math.round(v) + 0.5;
@@ -91,6 +90,12 @@ function fillTracked(ctx: Hud2D, text: string, x: number, y: number, tracking: n
 
 function measureTracked(ctx: Hud2D, text: string, tracking: number): number {
   return trackedWidth(Array.from(text).map((g) => ctx.measureText(g).width), tracking);
+}
+
+/** Tracked text centred horizontally on `cx` with its baseline at `y`. */
+function fillTrackedCentred(ctx: Hud2D, text: string, cx: number, y: number, tracking: number): void {
+  const width = measureTracked(ctx, text, tracking);
+  fillTracked(ctx, text, cx - width / 2, y, tracking, 'left');
 }
 
 function drawLeader(ctx: Hud2D, from: Vec2, to: Vec2): void {
@@ -141,6 +146,66 @@ function drawFreeBox(ctx: Hud2D, b: HudBox, size: Size): void {
   drawBoxPx(ctx, c, b.w * size.width, b.h * size.height);
 }
 
+/** Thin arc from 12 o'clock to the (quantized) progress; nothing for progress 0. */
+function strokeProgressArc(ctx: Hud2D, center: Vec2, radius: number, progress: number): void {
+  const a1 = arcEndAngle(progress);
+  if (!(a1 > RING_START_ANGLE) || !(radius > 0)) return;
+  ctx.lineWidth = RING_LINE_PX;
+  ctx.beginPath();
+  ctx.arc(center.x, center.y, radius, RING_START_ANGLE, a1);
+  ctx.stroke();
+}
+
+/**
+ * 5 % bucket of the hold-still ring drawn for `model`, or 0 when no ring is drawn
+ * (no progress, window faded out, or no corner callout to anchor it). Shared with
+ * the redraw-dedupe key so the key and the drawing agree by construction.
+ */
+export function dwellRingBucket(model: HudModel): number {
+  const p = model.dwellProgress;
+  if (typeof p !== 'number' || !(p > 0) || !(model.opacity > 0)) return 0;
+  if (!model.callouts.some((c) => c.id === 'corner')) return 0;
+  return progressBucket(p);
+}
+
+/** Hold-still ring: thin arc around the corner callout anchor (14 px at 720p); follows the window opacity. */
+function drawDwellRing(ctx: Hud2D, model: HudModel, size: Size): void {
+  const corner = model.callouts.find((c) => c.id === 'corner');
+  const p = model.dwellProgress;
+  if (!corner || typeof p !== 'number') return;
+  const anchorPx = toPx(corner.anchor, size);
+  if (!Number.isFinite(anchorPx.x) || !Number.isFinite(anchorPx.y)) return;
+  strokeProgressArc(ctx, anchorPx, dwellRingRadiusPx(size.height), p);
+}
+
+/**
+ * Self-timer countdown: a centred numeral (18 % of the canvas height) with the
+ * action label above it and a thin progress arc around it. Independent of the
+ * window: drawn at a fixed alpha, static over time (no pulse, also under reduced motion).
+ */
+function drawCountdown(ctx: Hud2D, cd: HudCountdown, size: Size, family: string, color: string): void {
+  const text = countdownText(cd.secondsLeft);
+  if (!text) return;
+  const l = countdownLayout(size);
+  ctx.save();
+  ctx.globalAlpha = COUNTDOWN_ALPHA;
+  applyShadow(ctx);
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'miter';
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = fontString(l.fontPx, family);
+  fillTrackedCentred(ctx, text, l.center.x, l.baselineY, l.fontPx * TRACKING_EM);
+  const label = COUNTDOWN_LABELS[cd.action];
+  if (label) {
+    ctx.font = fontString(l.labelFontPx, family);
+    fillTrackedCentred(ctx, label, l.center.x, l.labelBaselineY, l.labelFontPx * TRACKING_EM);
+  }
+  strokeProgressArc(ctx, l.center, l.ringRadius, cd.progress);
+  ctx.restore();
+}
+
 function drawRecordDot(ctx: Hud2D, size: Size, t: number, reducedMotion: boolean): void {
   if (!blinkOn(t, reducedMotion)) return;
   const r = RECORD_DOT_PX / 2;
@@ -169,6 +234,7 @@ function drawFpsBadge(ctx: Hud2D, fps: number, fontPx: number, tracking: number,
 /**
  * Render a HUD model into a 2D context sized `size` (device pixels).
  * Pure with respect to its inputs: identical (model, size, opts) ⇒ identical draw calls.
+ * Draw order: callouts + boxes + dwell ring (window opacity) → countdown → record dot → fps badge → debug overlay.
  */
 export function drawHud(ctx: Hud2D, model: HudModel | HudModelExt, size: Size, opts: DrawOptions): void {
   ctx.clearRect(0, 0, size.width, size.height);
@@ -178,11 +244,12 @@ export function drawHud(ctx: Hud2D, model: HudModel | HudModelExt, size: Size, o
   const fontPx = hudFontPx(size.height);
   const tracking = fontPx * TRACKING_EM;
   const color = HUD_COLORS[model.tint] ?? HUD_COLORS.white;
-  const ext = isExt(model) ? model : null;
+  const ext = isHudModelExt(model) ? model : null;
   const t = ext ? ext.t : (typeof performance !== 'undefined' ? performance.now() : 0);
+  const boxes = model.boxes ?? [];
 
   const opacity = Math.min(1, Math.max(0, model.opacity));
-  if (opacity > 0 && (model.callouts.length > 0 || (ext && ext.boxes.length > 0))) {
+  if (opacity > 0 && (model.callouts.length > 0 || boxes.length > 0)) {
     ctx.save();
     ctx.globalAlpha = opacity;
     applyShadow(ctx);
@@ -194,10 +261,12 @@ export function drawHud(ctx: Hud2D, model: HudModel | HudModelExt, size: Size, o
     ctx.lineJoin = 'miter';
     ctx.textBaseline = 'alphabetic';
     for (const c of model.callouts) drawCallout(ctx, c, size, fontPx, tracking);
-    if (ext) for (const b of ext.boxes) drawFreeBox(ctx, b, size);
+    for (const b of boxes) drawFreeBox(ctx, b, size);
+    if (dwellRingBucket(model) > 0) drawDwellRing(ctx, model, size);
     ctx.restore();
   }
 
+  if (model.countdown) drawCountdown(ctx, model.countdown, size, family, color);
   if (model.recording) drawRecordDot(ctx, size, t, opts.reducedMotion);
   if (model.fps !== null && Number.isFinite(model.fps)) drawFpsBadge(ctx, model.fps, fontPx, tracking, family, model.tint);
 

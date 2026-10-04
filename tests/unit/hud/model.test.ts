@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildHudModel, EYE_RIGHT_MIN_AREA, MOUTH_OPEN_BOX_THRESHOLD, MOUTH_BOX_WIDTH_FACTOR } from '../../../src/hud/model';
+import type { HudCountdown, HudModel } from '../../../src/types';
 import { makeFace, makeFrame, makeQuad, LIVE_SCENE, COMIC_SCENE, NO_EXTRAS } from './fixtures';
 
 const byId = (m: ReturnType<typeof buildHudModel>, id: string) => m.callouts.find((c) => c.id === id);
@@ -138,7 +139,46 @@ describe('buildHudModel — tint, recording, fps', () => {
   });
 });
 
-describe('buildHudModel — thin slits (lead errata §4b.1/5)', () => {
+describe('buildHudModel — countdown and dwell passthrough', () => {
+  const cd: HudCountdown = { action: 'record', secondsLeft: 3, progress: 0.2 };
+
+  it('passes the countdown through from extras, even without a quad (window hidden)', () => {
+    const m = buildHudModel(null, null, LIVE_SCENE, 0, { ...NO_EXTRAS, countdown: cd });
+    expect(m.countdown).toEqual(cd);
+    expect(m.opacity).toBe(0);
+    expect(m.callouts).toEqual([]);
+  });
+
+  it('keeps the countdown alongside the callouts when the window is open', () => {
+    const snap: HudCountdown = { action: 'snapshot', secondsLeft: 5, progress: 0 };
+    const m = buildHudModel(makeFrame({ face: makeFace() }), makeQuad(), COMIC_SCENE, 0, { ...NO_EXTRAS, countdown: snap });
+    expect(m.countdown).toEqual(snap);
+    expect(m.callouts.length).toBeGreaterThan(0);
+    expect(m.tint).toBe('red');
+  });
+
+  it('normalizes a missing or null countdown to null', () => {
+    expect(buildHudModel(null, makeQuad(), LIVE_SCENE, 0, NO_EXTRAS).countdown).toBeNull();
+    expect(buildHudModel(null, makeQuad(), LIVE_SCENE, 0, { ...NO_EXTRAS, countdown: null }).countdown).toBeNull();
+  });
+
+  it('passes dwellProgress through; missing, null or non-finite → null', () => {
+    expect(buildHudModel(null, makeQuad(), LIVE_SCENE, 0, { ...NO_EXTRAS, dwellProgress: 0.4 }).dwellProgress).toBe(0.4);
+    expect(buildHudModel(null, makeQuad(), LIVE_SCENE, 0, { ...NO_EXTRAS, dwellProgress: 0 }).dwellProgress).toBe(0);
+    expect(buildHudModel(null, makeQuad(), LIVE_SCENE, 0, NO_EXTRAS).dwellProgress).toBeNull();
+    expect(buildHudModel(null, makeQuad(), LIVE_SCENE, 0, { ...NO_EXTRAS, dwellProgress: null }).dwellProgress).toBeNull();
+    expect(buildHudModel(null, makeQuad(), LIVE_SCENE, 0, { ...NO_EXTRAS, dwellProgress: Number.NaN }).dwellProgress).toBeNull();
+  });
+
+  it('carries the mouth box on the contract `boxes` field (readable through the plain HudModel type)', () => {
+    const m: HudModel = buildHudModel(makeFrame({ face: makeFace({ mouthOpen: 0.5 }) }), makeQuad(), LIVE_SCENE, 0, NO_EXTRAS);
+    expect(m.boxes).toHaveLength(1);
+    expect(m.boxes?.[0]?.w).toBeCloseTo(0.096, 5);
+    expect(m.callouts.some((c) => c.id === 'mouth')).toBe(false);
+  });
+});
+
+describe('buildHudModel — thin slits', () => {
   it('still emits corner + eye-left for a 2 px-tall visible slit', () => {
     const slit = makeQuad({
       corners: [{ x: 0.3, y: 0.5 }, { x: 0.7, y: 0.5 }, { x: 0.7, y: 0.503 }, { x: 0.3, y: 0.503 }],

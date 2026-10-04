@@ -21,8 +21,8 @@ export default tseslint.config(
       '.vercel/**',
       // Any dot-directory (e.g. ad-hoc build checks like .w3-dist-check/) is never source.
       '**/.*/**',
-      // Dev harness pages are per-worker visual sandboxes; they must typecheck (tsc includes src/**)
-      // but are not held to app lint rules (lead-checklist B16).
+      // Dev harness pages are per-module visual sandboxes; they must typecheck (tsc includes src/**)
+      // but are not held to app lint rules.
       'src/**/__harness__/**',
     ],
   },

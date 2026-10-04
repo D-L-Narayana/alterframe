@@ -31,6 +31,8 @@ export class FakeVideo extends FakeEventTarget {
   paused = true;
   readyState = 0;
   currentTime = 0;
+  /** NaN until metadata, like the element. */
+  duration = NaN;
   videoWidth = 0;
   videoHeight = 0;
   srcObject: MediaStream | null = null;
@@ -56,13 +58,26 @@ export class FakeVideo extends FakeEventTarget {
   removeAttribute(k: string): void {
     this.attrs.delete(k);
   }
+  /** `play`/`pause` events the element would fire as LATER tasks (HTML spec); delivered by `flushEvents()`. */
+  pendingEvents: string[] = [];
+  /** Like the element: `paused` flips synchronously inside the call; the `play` event is a later task. */
   play(): Promise<void> {
     this.playCalls += 1;
     this.paused = false;
+    this.pendingEvents.push('play');
     return Promise.resolve();
   }
   pause(): void {
     this.paused = true;
+    this.pendingEvents.push('pause');
+  }
+  /** Test helper: deliver the queued play/pause events in order (the browser's later event tasks). */
+  flushEvents(): void {
+    for (const ev of this.pendingEvents.splice(0)) this.dispatch(ev);
+  }
+  /** Test helper: the browser finished a seek (currentTime was set by the caller). */
+  completeSeek(): void {
+    this.dispatch('seeked');
   }
   load(): void {
     this.loadCalls += 1;

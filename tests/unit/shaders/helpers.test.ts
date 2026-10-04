@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { hexToRgb, pxScale, inkWidthTexels, glslUniformDecls } from '../../../src/render/shaders';
-import { DEFAULT_QUALITY } from '../../../src/types/render';
+import { DEFAULT_LOOK, DEFAULT_QUALITY } from '../../../src/types/render';
 import { DEFAULT_SCENE } from '../../../src/types/scene';
 
-const ctx = { time: 0, width: 1280, height: 720, scene: DEFAULT_SCENE, quality: DEFAULT_QUALITY };
+const ctx = { time: 0, width: 1280, height: 720, scene: DEFAULT_SCENE, quality: DEFAULT_QUALITY, look: DEFAULT_LOOK };
 
 describe('shader helpers', () => {
   it('hexToRgb converts persona tokens to 0..1 triples', () => {

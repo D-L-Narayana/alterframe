@@ -1,16 +1,21 @@
 /**
- * Style presets (W5): ordered pass chains for the two looks the app needs.
+ * Style presets: ordered pass chains for the two looks the app needs.
  *
  *  paper-portrait  smooth → quantize(clean) → ink(all edges, paper background) → grade(paper)
  *  comic           smooth → quantize(warm)  → ink → halftone → backdrop → grade(comic)
  *
- * Both presets set `usesBackdrop: true`: paper-portrait paints `u_backdrop` (W6 paper) where
- * the mask says background, comic paints W6's night city / warm paper there.
+ * Both presets set `usesBackdrop: true`: paper-portrait paints `u_backdrop` (the persona
+ * layer's paper) where the mask says background, comic paints the persona layer's night
+ * city / warm paper there.
  *
  * `COMIC_BASE_PRESET` is the comic chain WITHOUT the backdrop pass, for the full-frame base
  * layer (`scene.base === 'comic'`), where the real room must stay visible as stylized
  * comic — replacing it with the persona backdrop would be wrong there. `presetForLayer`
- * encodes the scene → preset mapping from implementation-plan.md §2.
+ * encodes the scene → preset mapping (window: by persona; base: live → raw video,
+ * comic → the base chain).
+ *
+ * Look tuning (`LookSettings`) does not change the chains: every pass reads `ctx.look` in
+ * its `uniforms()`; the pass lists and their order are fixed.
  */
 import type { StylePreset, StyleId } from '../types/render';
 import type { SceneState } from '../types/scene';
@@ -37,6 +42,12 @@ export const COMIC_BASE_PRESET: StylePreset = {
   usesBackdrop: false,
   passes: STYLE_PRESETS.comic.passes.filter((p) => p !== backdrop),
 };
+
+/**
+ * Every preset the renderer can run, for `Renderer.warm()` at start-up (compile all programs
+ * before the first styled frame). Order: the two window looks, then the base-layer chain.
+ */
+export const ALL_PRESETS: readonly StylePreset[] = Object.freeze([STYLE_PRESETS['paper-portrait'], STYLE_PRESETS.comic, COMIC_BASE_PRESET]);
 
 /**
  * Which preset a layer should run for a scene.

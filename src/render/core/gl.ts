@@ -1,6 +1,6 @@
 /**
- * Thin WebGL2 helpers + the StylePass runner. Everything that owns GL objects is created through
- * `GlResources` so the renderer can throw it all away and rebuild after a context loss.
+ * Thin WebGL2 helpers + the StylePass runner. Every GL object is owned by the Compositor that
+ * created it, so the renderer can throw it all away and rebuild after a context loss.
  */
 import type { PassContext, StylePass, UniformValue } from '@/types';
 import { FRAG_PRELUDE, VERTEX_SOURCE, buildFragmentSource } from './prelude';
@@ -195,9 +195,23 @@ export class ProgramCache {
 
   constructor(private readonly gl: WebGL2RenderingContext) {}
 
+  /** Number of linked programs held by the cache. */
+  get size(): number {
+    return this.programs.size;
+  }
+
+  /** True when `get()` with the same sources would be a cache hit (no compile). */
+  has(fragmentSource: string, vertexSource: string = VERTEX_SOURCE): boolean {
+    return this.programs.has(ProgramCache.key(fragmentSource, vertexSource));
+  }
+
+  private static key(fragmentSource: string, vertexSource: string): string {
+    return vertexSource === VERTEX_SOURCE ? fragmentSource : `${vertexSource}\u0000${fragmentSource}`;
+  }
+
   /** Returns the program for a full fragment source (prelude included) or throws with the GL log. */
   get(fragmentSource: string, vertexSource: string = VERTEX_SOURCE): Program {
-    const key = vertexSource === VERTEX_SOURCE ? fragmentSource : `${vertexSource}\u0000${fragmentSource}`;
+    const key = ProgramCache.key(fragmentSource, vertexSource);
     const hit = this.programs.get(key);
     if (hit) return hit;
     const { program, log } = createProgram(this.gl, vertexSource, fragmentSource);
@@ -217,7 +231,7 @@ export class ProgramCache {
 }
 
 /**
- * Compile a StylePass (prelude + body) and report `{ ok, log }`. Exported for W5's tests.
+ * Compile a StylePass (prelude + body) and report `{ ok, log }`. Exported for the shader tests.
  * Without an explicit context a hidden one is created lazily and shared.
  */
 export function compilePass(pass: Pick<StylePass, 'frag' | 'id'>, gl?: WebGL2RenderingContext | null): CompileResult {

@@ -2,7 +2,7 @@
  * Compositor pixel proof (owner: W10, verifies W4 via readPixels — contract §W4 acceptance):
  * with a solid base and a solid window style, pixels inside the quad equal the window colour,
  * outside equal the base colour, and opacity 0.5 yields a blend. Also asserts the single cover-fit
- * mapping at three viewports (lead-checklist B1) and UV mirroring of the quad (B2).
+ * mapping at three viewports and that mirroring flips the video sampling only, not the quad.
  */
 import { test, expect, type Page } from '@playwright/test';
 import type { QuadCorners } from '@/types';

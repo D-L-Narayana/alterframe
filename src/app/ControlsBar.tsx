@@ -21,13 +21,24 @@ export const BASE_OPTIONS = [
   { value: 'comic', label: 'Comic', shortcut: 'B' },
 ] as const satisfies ReadonlyArray<{ value: BaseStyle; label: string; shortcut: string }>;
 
+export interface RecordingIndicatorProps {
+  elapsedMs: number;
+  /** Armed auto-stop length (ms); null/undefined when the recording stops manually. */
+  autoStopMs?: number | null;
+}
+
 /** Red dot + mm:ss while recording (blink disabled under reduced motion via CSS tokens). */
-export function RecordingIndicator({ elapsedMs }: { elapsedMs: number }) {
+export function RecordingIndicator({ elapsedMs, autoStopMs = null }: RecordingIndicatorProps) {
   const text = formatElapsed(elapsedMs);
+  const remaining = autoStopMs !== null && autoStopMs > 0 ? formatElapsed(Math.max(0, autoStopMs - elapsedMs)) : null;
+  const label = remaining === null ? `Recording, ${text}` : `Recording, ${text}, stops in ${remaining}`;
   return (
     <span className="af-controls__rec" aria-live="off">
       <span className="af-controls__dot" aria-hidden="true" />
-      <span aria-label={`Recording, ${text}`}>{text}</span>
+      <span aria-label={label}>
+        {text}
+        {remaining !== null ? <span className="af-controls__rec-left" aria-hidden="true">−{remaining}</span> : null}
+      </span>
     </span>
   );
 }
@@ -53,6 +64,7 @@ export function ControlsBar({ actions, onSwitchCamera }: ControlsBarProps) {
   const directorRunning = useAppStore((s) => s.directorRunning);
   const recorderState = useAppStore((s) => s.recorderState);
   const elapsed = useAppStore((s) => s.recorderElapsedMs);
+  const autoStopMs = useUiStore((s) => s.autoStopMs);
   const panel = useUiStore((s) => s.panel);
   const togglePanel = useUiStore((s) => s.togglePanel);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -93,7 +105,7 @@ export function ControlsBar({ actions, onSwitchCamera }: ControlsBarProps) {
             disabled={finalizing}
             onClick={actions.toggleRecord}
           />
-          {recording ? <RecordingIndicator elapsedMs={elapsed} /> : null}
+          {recording ? <RecordingIndicator elapsedMs={elapsed} autoStopMs={autoStopMs} /> : null}
           <IconButton label="Snapshot" shortcut="S" icon={<CameraIcon />} onClick={actions.snapshot} />
         </div>
 

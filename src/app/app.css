@@ -41,13 +41,53 @@
 .af-stage__loader {
   position: absolute; top: 0; left: 0; right: 0; z-index: 5; pointer-events: none;
 }
-.af-stage__loader-bar { height: 3px; background: linear-gradient(90deg, transparent, var(--af-accent), var(--af-accent-2), transparent); background-size: 50% 100%; animation: af-indeterminate 1.2s linear infinite; }
+/* Determinate model-download bar: width follows aria-valuenow; pulses softly before the first byte. */
+.af-stage__loader-track { height: 3px; background: rgba(255,255,255,.08); overflow: hidden; }
+.af-stage__loader-bar { height: 100%; background: linear-gradient(90deg, var(--af-accent), var(--af-accent-2)); transition: width 200ms linear; }
+.af-stage__loader-track--waiting { animation: af-pulse 1.2s ease-in-out infinite; }
 .af-stage__loader-text {
   display: inline-block; margin: 10px; padding: 6px 10px; border-radius: var(--af-radius-pill);
   background: var(--af-glass); border: 1px solid var(--af-hairline); backdrop-filter: blur(12px);
-  font-size: var(--af-fs-xs); color: var(--af-muted);
+  font-size: var(--af-fs-xs); color: var(--af-muted); font-variant-numeric: tabular-nums;
 }
-@keyframes af-indeterminate { from { background-position: -50% 0; } to { background-position: 150% 0; } }
+@keyframes af-pulse { 50% { opacity: .35; } }
+
+/* ---------- Tracker failure card (non-blocking; the stage keeps running untracked) ---------- */
+.af-tracker-card {
+  position: absolute; top: calc(max(12px, env(safe-area-inset-top)) + 56px); left: 50%; transform: translateX(-50%); z-index: 15;
+  width: min(92vw, 440px); padding: 16px 18px;
+  background: var(--af-surface); border: 1px solid rgba(255,59,48,.45); border-radius: 14px; box-shadow: var(--af-shadow);
+}
+.af-tracker-card h2 { margin: 0 0 6px; font-size: var(--af-fs-md); }
+.af-tracker-card p { margin: 0 0 12px; color: var(--af-muted); font-size: var(--af-fs-sm); overflow-wrap: anywhere; }
+.af-tracker-card__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ---------- Stage notices (countdown, coach hint, file transport) — stacked above the controls bar ---------- */
+.af-notices {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--af-bar-h) + max(12px, env(safe-area-inset-bottom)) + 12px);
+  z-index: 9; width: min(92vw, 560px);
+  display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none;
+}
+.af-notices > * { pointer-events: auto; }
+.af-coach, .af-countdown {
+  display: flex; align-items: center; gap: 10px; padding: 4px 4px 4px 14px;
+  background: var(--af-glass); border: 1px solid var(--af-hairline-strong); border-radius: var(--af-radius-pill);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: var(--af-shadow);
+  font-size: var(--af-fs-sm); max-width: 100%;
+}
+.af-coach svg { color: var(--af-accent); flex: none; }
+.af-coach__text { color: var(--af-text); }
+.af-countdown { border-color: rgba(255,79,182,.55); }
+.af-countdown__text { font-weight: 600; font-variant-numeric: tabular-nums; }
+.af-transport {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 10px 6px 6px;
+  background: var(--af-glass); border: 1px solid var(--af-hairline-strong); border-radius: 14px;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: var(--af-shadow);
+}
+.af-transport__seek { flex: 1; min-width: 100px; }
+.af-transport__time { font-family: var(--af-font-mono); font-size: var(--af-fs-xs); color: var(--af-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.af-transport .af-toggle { width: auto; gap: 8px; flex: none; }
 
 /* ---------- Controls bar ---------- */
 .af-controls {
@@ -61,6 +101,7 @@
 .af-controls__group { display: flex; align-items: center; gap: 4px; }
 .af-controls__sep { width: 1px; height: 28px; background: var(--af-hairline-strong); margin: 0 4px; }
 .af-controls__rec { display: inline-flex; align-items: center; gap: 6px; font-family: var(--af-font-mono); font-size: var(--af-fs-sm); color: var(--af-danger); min-width: 64px; font-variant-numeric: tabular-nums; }
+.af-controls__rec-left { margin-left: 6px; color: var(--af-muted); font-size: var(--af-fs-xs); }
 .af-controls__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--af-danger); animation: af-blink 1s steps(1) infinite; }
 @keyframes af-blink { 50% { opacity: .25; } }
 .af-badge {
@@ -93,6 +134,16 @@
 .af-error__card h2 { margin: 0 0 8px; font-size: var(--af-fs-lg); }
 .af-error__card p { margin: 0 0 16px; color: var(--af-muted); }
 .af-error__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* ---------- Diagnostics (Settings) ---------- */
+.af-diag { margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: var(--af-fs-sm); }
+.af-diag__row { display: flex; gap: 12px; align-items: baseline; }
+.af-diag dt { flex: 0 0 104px; color: var(--af-muted); }
+.af-diag dd { margin: 0; font-family: var(--af-font-mono); font-size: var(--af-fs-xs); overflow-wrap: anywhere; }
+.af-diag__pre {
+  margin: 0; padding: 10px; max-height: 240px; overflow: auto; font-size: var(--af-fs-xs); line-height: 1.4;
+  background: rgba(255,255,255,.04); border: 1px solid var(--af-hairline); border-radius: var(--af-radius-sm); user-select: all;
+}
 
 /* ---------- Help ---------- */
 .af-help__table { width: 100%; border-collapse: collapse; }

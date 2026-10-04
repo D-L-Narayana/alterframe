@@ -1,4 +1,4 @@
-import type { Vec2, Vec3, Rect } from './geometry';
+import type { Vec2, Vec3, Rect, Size } from './geometry';
 
 /** Which side of the SCREEN the hand is on (not anatomical handedness). */
 export type HandSide = 'left' | 'right';
@@ -39,7 +39,7 @@ export interface FaceTrack {
   landmarks: Vec3[];
   /** ARKit-style blendshape name → 0..1 (e.g. eyeBlinkLeft, jawOpen, mouthSmileLeft). */
   blendshapes: Record<string, number>;
-  /** 4x4 column-major facial transformation matrix, if available. */
+  /** 4x4 column-major facial transformation matrix (camera space, not mirrored), if available. */
   transform: Float32Array | null;
   /** Derived anchors (display space). "left/right" are the VIEWER's left/right on screen. */
   leftEye: Vec2;   // eye on screen-left
@@ -58,12 +58,15 @@ export interface FaceTrack {
 }
 
 export interface SegmentationResult {
-  /** Mask resolution (typically 256x256 or source res). */
+  /** Mask resolution (typically 256x256). */
   width: number;
   height: number;
   /** Person confidence 0..1 per pixel, row-major, top-left origin, ALREADY mirrored to display space. */
   data: Float32Array;
-  /** Optional GPU copy owned by the tracker (valid only until next update). */
+  /**
+   * Optional GPU copy owned by the tracker. Always null in the current implementation: MediaPipe's
+   * texture lives in its own GL context and cannot be sampled by the compositor.
+   */
   texture: WebGLTexture | null;
 }
 
@@ -77,9 +80,33 @@ export interface TrackingFrame {
   sourceHeight: number;
   /** 0, 1 or 2 hands, sorted by palmCenter.x ascending (screen-left first). */
   hands: HandTrack[];
+  /** The face, or null. With `faceStride > 1` the same object is reused between face runs. */
   face: FaceTrack | null;
+  /** A new object each time the mask is refreshed; the same object between stride frames. */
   segmentation: SegmentationResult | null;
   timings: TrackingTimings;
+}
+
+export type TrackingDelegate = 'GPU' | 'CPU';
+
+/** Diagnostics exposed by the tracker (`Tracker.getInfo`). Consumers must treat every field as informational. */
+export interface TrackerInfo {
+  /** Delegate actually in use per task (after fallback). null = task disabled or not created. */
+  delegates: { hands: TrackingDelegate | null; face: TrackingDelegate | null; segmentation: TrackingDelegate | null };
+  /** Non-fatal problems (e.g. GPU init failure) in human-readable form, newest last. */
+  warnings: string[];
+  /** Resolves when any pending re-configuration (setOptions) has been applied. */
+  pending: Promise<void>;
+  /** Labels reported by the segmenter model and the confidence-mask channel read. */
+  segmentationLabels: string[];
+  segmentationChannel: number;
+  /** Whether the last segmentation mask came from a GPU texture and was row-flipped. */
+  lastMaskFromGpu: boolean;
+  lastMaskFlippedY: boolean;
+  /** Native mask resolution reported by MediaPipe for the last segmentation. */
+  lastMaskSize: Size | null;
+  /** Size of the frame actually handed to the models on the last update (after inferenceMaxHeight downscale), or null before the first update. */
+  inferenceSize: Size | null;
 }
 
 export interface TrackerOptions {
@@ -87,12 +114,16 @@ export interface TrackerOptions {
   modelBaseUrl?: string;
   /** Base URL for MediaPipe wasm (default '/wasm'). */
   wasmBaseUrl?: string;
-  delegate?: 'GPU' | 'CPU';
+  delegate?: TrackingDelegate;
   numHands?: 1 | 2;
   enableFace?: boolean;
   enableSegmentation?: boolean;
   /** Run segmentation every N frames (default 1). Adaptive quality may raise this. */
   segmentationStride?: number;
+  /** Run the face landmarker every N analysed frames (default 1). Adaptive quality may raise this. */
+  faceStride?: number;
+  /** Downscale frames taller than this (px) before inference (default 720 = no resampling for a 720p source). */
+  inferenceMaxHeight?: number;
   /** Apply horizontal mirror to all outputs (default true, selfie view). */
   mirrored?: boolean;
   /** One-Euro smoothing parameters. */
@@ -100,10 +131,13 @@ export interface TrackerOptions {
 }
 
 export interface Tracker {
+  /** Loads wasm + models. Re-entrant: after a rejection a new call retries (only the missing pieces are fetched again). */
   init(): Promise<void>;
   /** Analyse one video frame. Must be cheap to call at display rate; may reuse the previous result if the frame is unchanged. */
   update(video: HTMLVideoElement | HTMLCanvasElement | ImageBitmap, t: number): TrackingFrame;
   setOptions(partial: Partial<TrackerOptions>): void;
   readonly ready: boolean;
+  /** Diagnostics (delegates, warnings, inference size). Optional for test doubles. */
+  getInfo?(): TrackerInfo;
   dispose(): void;
 }

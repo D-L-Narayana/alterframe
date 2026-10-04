@@ -11,6 +11,12 @@ import { fileURLToPath, URL } from 'node:url';
  * Chromium is started with a fake camera fed from the GENERATED fixture
  * tests/fixtures/hands.y4m (`npm run fixture`). The file is >5 MB and gitignored;
  * `pretest:e2e` regenerates it when missing.
+ *
+ * Permissions: only `camera` globally. Specs that need more (e.g. diagnostics.spec.ts reads the
+ * clipboard) add them with `test.use({ permissions: [...] })` in the spec itself.
+ * The production gate (tests/e2e/production-gate.spec.ts) targets `E2E_PROD_URL` and is normally run
+ * through `node scripts/with-server.mjs -- npm run test:prod-gate`, which also sets `E2E_BASE_URL`
+ * so no dev server is started.
  */
 // Port 6220 is W10's reserved dev/QA port (workers use 6211–6220); `npm run qa` serves it.
 const PORT = Number(process.env.E2E_PORT ?? 6220);

@@ -1,6 +1,7 @@
 /**
  * Compositor-internal GLSL bodies (prelude is prepended by the core, see prelude.ts).
- * These are not StylePasses visible to W5; they implement ingest, window compositing and present.
+ * These are not StylePasses visible to the style layer; they implement ingest, window compositing
+ * and present.
  */
 
 /** Raw video → display-space video. The single mirror in the pipeline (`u_mirror` 0/1). */
@@ -60,7 +61,10 @@ void main() {
 
 /**
  * Present: default framebuffer shows clip y=+1 at the top, so flip once, then map canvas uv →
- * display uv through the cover-fit transform and sample the composite and the HUD identically.
+ * display uv through the fit transform (cover or contain) and sample the composite and the HUD
+ * identically. Display uv outside [0,1] on either axis only happens under 'contain' (letterbox
+ * bars): those pixels are opaque black and the HUD is never drawn there. Under 'cover' the branch
+ * is never taken, so the output is identical to a plain cover-fit present.
  */
 export const PRESENT_FRAG = `uniform sampler2D u_hud;
 uniform vec2 u_fitScale;
@@ -68,6 +72,10 @@ uniform vec2 u_fitOffset;
 void main() {
   vec2 canvasUv = vec2(v_uv.x, 1.0 - v_uv.y);
   vec2 duv = canvasUv * u_fitScale + u_fitOffset;
+  if (any(lessThan(duv, vec2(0.0))) || any(greaterThan(duv, vec2(1.0)))) {
+    fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
   vec3 c = texture(u_color, duv).rgb;
   vec4 h = texture(u_hud, duv);
   fragColor = vec4(mix(c, h.rgb, clamp(h.a, 0.0, 1.0)), 1.0);

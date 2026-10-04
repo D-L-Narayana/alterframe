@@ -22,7 +22,9 @@ export type InteractionEvent =
   | { type: 'window-open' }
   | { type: 'window-close' }
   | { type: 'cycle-persona'; next: PersonaId }
-  | { type: 'hands-together-armed' };
+  | { type: 'hands-together-armed' }
+  /** Both hands held the window still for `dwellMs` (hands-free capture trigger). Emitted once per stillness episode. */
+  | { type: 'dwell' };
 
 export interface InteractionSettings {
   ordering: WindowOrdering;
@@ -40,18 +42,25 @@ export interface InteractionSettings {
   openArea: number;
   /** Enable persona cycling via the hands-together gesture. */
   gestureCycleEnabled: boolean;
+  /** Cosmetic corner lag: 0 = off (corners equal the tips), else critically damped spring stiffness 0.05..0.9 (fraction of the gap closed per 60 Hz frame). Default 0. */
+  cornerSpring: number;
+  /** Hold-still duration (ms) before a `dwell` event fires; 0 disables the detector. Default 0. */
+  dwellMs: number;
+  /** Max corner motion (normalized display units) tolerated during the hold. Default 0.012. */
+  dwellTolerance: number;
 }
 
 export const DEFAULT_INTERACTION_SETTINGS: InteractionSettings = {
   ordering: 'convex', holdMs: 300, fadeMs: 150, minHandScore: 0.5,
   togetherDistance: 0.12, togetherArmMs: 500, openArea: 0.02, gestureCycleEnabled: true,
+  cornerSpring: 0, dwellMs: 0, dwellTolerance: 0.012,
 };
 
 export interface InteractionOutput {
   quad: WindowQuad | null;
   events: InteractionEvent[];
-  /** Debug values for the dev overlay. */
-  debug: { armed: boolean; togetherMs: number; handsUsed: number };
+  /** Debug values for the dev overlay. `dwellProgress` is 0..1 towards the next `dwell` event (0 when disabled). */
+  debug: { armed: boolean; togetherMs: number; handsUsed: number; dwellProgress?: number };
 }
 
 export interface Interaction {
@@ -65,4 +74,6 @@ export interface Director {
   /** Returns the scene for time t, or null when not running. */
   update(t: number): SceneState | null;
   readonly running: boolean;
+  /** Index into the sequence for absolute time t, or -1 when not running. Optional for test doubles. */
+  stepIndex?(t: number): number;
 }

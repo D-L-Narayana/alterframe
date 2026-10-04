@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   hudFontPx, placeLabel, bracketSegments, blinkOn, trackedWidth, clampToBounds,
   RIGHT_ALIGN_THRESHOLD_X, LABEL_BASELINE_GAP_PX, BRACKET_SIZE_PX, EDGE_PAD_PX, fpsBadgeText, toPx,
+  countdownFontPx, countdownLayout, countdownText, progressBucket, arcEndAngle, dwellRingRadiusPx,
+  COUNTDOWN_FONT_HEIGHT_RATIO, COUNTDOWN_MIN_FONT_PX, COUNTDOWN_ALPHA, COUNTDOWN_LABELS, CAP_HEIGHT_EM,
+  DWELL_RING_RADIUS_720_PX, RING_LINE_PX, RING_START_ANGLE,
 } from '../../../src/hud/layout';
 
 const SIZE = { width: 1920, height: 1080 };
@@ -117,5 +120,89 @@ describe('fpsBadgeText', () => {
   it('rounds to a whole number', () => {
     expect(fpsBadgeText(59.6)).toBe('60 fps');
     expect(fpsBadgeText(0)).toBe('0 fps');
+  });
+});
+
+describe('countdown layout', () => {
+  it('sizes the numeral at 18 % of canvas height, never below 48 px', () => {
+    expect(COUNTDOWN_FONT_HEIGHT_RATIO).toBe(0.18);
+    expect(COUNTDOWN_MIN_FONT_PX).toBe(48);
+    expect(countdownFontPx(1080)).toBe(194);
+    expect(countdownFontPx(720)).toBe(130);
+    expect(countdownFontPx(200)).toBe(48);
+    expect(countdownFontPx(Number.NaN)).toBe(48);
+  });
+
+  it('centres the numeral cap height on the canvas centre and stacks the label above it', () => {
+    expect(CAP_HEIGHT_EM).toBe(0.75);
+    const l = countdownLayout(SIZE);
+    expect(l.center).toEqual({ x: 960, y: 540 });
+    expect(l.fontPx).toBe(194);
+    expect(l.baselineY).toBe(Math.round(540 + (194 * CAP_HEIGHT_EM) / 2));
+    const capTop = l.baselineY - 194 * CAP_HEIGHT_EM;
+    expect(l.labelFontPx).toBe(hudFontPx(1080));
+    expect(l.labelBaselineY).toBeLessThan(capTop);
+    expect(l.labelBaselineY).toBeGreaterThan(capTop - 194 * 0.25);
+    // The progress ring clears a two-digit numeral yet stays well inside the frame.
+    expect(l.ringRadius).toBeGreaterThan(194 * 0.65);
+    expect(l.ringRadius).toBeLessThan(540);
+  });
+
+  it('is drawn at alpha 0.9 regardless of the window opacity', () => {
+    expect(COUNTDOWN_ALPHA).toBe(0.9);
+  });
+
+  it('formats whole seconds, rounding up, never negative, blank when not finite', () => {
+    expect(countdownText(3)).toBe('3');
+    expect(countdownText(10)).toBe('10');
+    expect(countdownText(2.2)).toBe('3');
+    expect(countdownText(0)).toBe('0');
+    expect(countdownText(-1)).toBe('0');
+    expect(countdownText(Number.NaN)).toBe('');
+  });
+
+  it('has one label per action', () => {
+    expect(COUNTDOWN_LABELS.record).toBe('RECORDING IN');
+    expect(COUNTDOWN_LABELS.snapshot).toBe('SNAPSHOT IN');
+  });
+});
+
+describe('progressBucket', () => {
+  it('quantizes 0..1 into 5 % steps and clamps the range', () => {
+    expect(progressBucket(0)).toBe(0);
+    expect(progressBucket(0.10)).toBe(2);
+    expect(progressBucket(0.12)).toBe(2);
+    expect(progressBucket(0.16)).toBe(3);
+    expect(progressBucket(1)).toBe(20);
+    expect(progressBucket(1.7)).toBe(20);
+    expect(progressBucket(-0.3)).toBe(0);
+    expect(progressBucket(Number.NaN)).toBe(0);
+  });
+});
+
+describe('progress arcs', () => {
+  it('start at 12 o\'clock and end at progress × 360°, quantized to the dedupe bucket', () => {
+    expect(RING_START_ANGLE).toBeCloseTo(-Math.PI / 2, 12);
+    expect(RING_LINE_PX).toBe(1.5);
+    expect(arcEndAngle(0)).toBeCloseTo(-Math.PI / 2, 12);
+    expect(arcEndAngle(0.25)).toBeCloseTo(0, 12);
+    expect(arcEndAngle(0.5)).toBeCloseTo(Math.PI / 2, 12);
+    expect(arcEndAngle(1)).toBeCloseTo(Math.PI * 1.5, 12);
+    // Same 5 % bucket ⇒ same arc, so a skipped redraw never hides a different ring.
+    expect(arcEndAngle(0.26)).toBe(arcEndAngle(0.25));
+  });
+});
+
+describe('dwellRingRadiusPx', () => {
+  it('is 14 px at 720p and scales linearly with the canvas height', () => {
+    expect(DWELL_RING_RADIUS_720_PX).toBe(14);
+    expect(dwellRingRadiusPx(720)).toBe(14);
+    expect(dwellRingRadiusPx(1080)).toBe(21);
+    expect(dwellRingRadiusPx(360)).toBe(7);
+  });
+  it('stays a usable positive size for degenerate heights', () => {
+    expect(dwellRingRadiusPx(0)).toBeGreaterThan(0);
+    expect(dwellRingRadiusPx(Number.NaN)).toBeGreaterThan(0);
+    expect(dwellRingRadiusPx(10)).toBeGreaterThan(0);
   });
 });

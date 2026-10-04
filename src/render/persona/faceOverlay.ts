@@ -2,25 +2,32 @@ import type { FaceTrack, Size, Vec2, PersonaId } from '../../types';
 import type { Ctx2D } from './canvas';
 import { PERSONA_PALETTE, PORTRAIT_IRIS, withAlpha, mixHex } from './palette';
 import {
-  eyeMetrics, lensShape, faceOvalPolygon, scalePolygon, polygonCentroid, torsoPolygon, mouthMetrics,
+  eyeMetrics, lensShape, lensSquash, faceOvalPolygon, scalePolygon, polygonCentroid, torsoPolygon, mouthMetrics,
   toPx, clamp01, TORSO, type LensPath, type EyeMetrics,
 } from './geometry';
 import { spiderEmblem } from './suitEmblem';
 
 /*
- * Face/body-attached overlays. The overlay canvas is RGBA and composited by W4 with normal
- * alpha on top of the stylised video INSIDE the window, so everything here stays ≤ 0.9 alpha
+ * Face/body-attached overlays. The overlay canvas is RGBA and composited by the renderer (W4) with
+ * normal alpha on top of the stylised video INSIDE the window, so everything here stays ≤ 0.9 alpha
  * (except the opaque mask lenses, which must hide the eyes) to let the cel shading breathe.
  *
  * All shapes come from the current frame's landmarks (already mirrored, normalized), so
  * they stay pixel-aligned to the face at any head roll; `face.roll` only orients ellipses.
+ *
+ * Look: `strength` (LookSettings.overlayStrength, 0..1) is applied as ONE multiplier on every
+ * globalAlpha assignment — 1 reproduces the authored alphas exactly, 0.5 halves all of them.
  */
 
-/** Overlay maximum alpha (contract: ≤ 0.9 so W5's cel shading shows through). */
+/** Overlay maximum alpha (≤ 0.9 so the cel shading underneath shows through). */
 export const OVERLAY_MAX_ALPHA = 0.9;
 
 /** Device-independent stroke unit: 1 at 720 px tall. */
 const unit = (size: Size) => Math.max(0.75, size.height / 720);
+
+/** `ctx.globalAlpha = alpha × strength` — the single place where the look attenuates the overlay. */
+type AlphaSetter = (alpha: number) => void;
+const alphaSetter = (ctx: Ctx2D, strength: number): AlphaSetter => (alpha) => { ctx.globalAlpha = alpha * strength; };
 
 function pathPolygon(ctx: Ctx2D, pts: readonly Vec2[]): void {
   ctx.beginPath();
@@ -45,7 +52,7 @@ const smoothstep = (v: number) => { const x = clamp01(v); return x * x * (3 - 2 
 
 // ───────────────────────────── portrait ─────────────────────────────
 
-function drawEyeAccent(ctx: Ctx2D, eye: EyeMetrics, roll: number, size: Size): void {
+function drawEyeAccent(ctx: Ctx2D, eye: EyeMetrics, roll: number, size: Size, setAlpha: AlphaSetter): void {
   const open = smoothstep((eye.open - 0.15) / 0.6);   // fully faded below 15 % open, full above 75 %
   if (open <= 0.001) return;
   const u = unit(size);
@@ -53,7 +60,7 @@ function drawEyeAccent(ctx: Ctx2D, eye: EyeMetrics, roll: number, size: Size): v
   const ry = rx * 0.82 * (0.3 + 0.7 * open);          // squash with the lid
   const { x: cx, y: cy } = eye.center;
   ctx.save();
-  ctx.globalAlpha = 0.85 * open;
+  setAlpha(0.85 * open);
   // iris: brown core → darker rim
   const g = ctx.createRadialGradient(cx, cy, rx * 0.1, cx, cy, rx);
   g.addColorStop(0, mixHex(PORTRAIT_IRIS, PERSONA_PALETTE.portrait.highlight, 0.25));
@@ -70,7 +77,7 @@ function drawEyeAccent(ctx: Ctx2D, eye: EyeMetrics, roll: number, size: Size): v
   const c = Math.cos(roll), s = Math.sin(roll);
   const hl = (ox: number, oy: number, r: number, a: number) => {
     const px = cx + ox * c - oy * s, py = cy + ox * s + oy * c;
-    ctx.globalAlpha = a * open;
+    setAlpha(a * open);
     pathEllipse(ctx, px, py, r, r * 0.85, roll);
     ctx.fillStyle = PERSONA_PALETTE.portrait.highlight;
     ctx.fill();
@@ -78,7 +85,7 @@ function drawEyeAccent(ctx: Ctx2D, eye: EyeMetrics, roll: number, size: Size): v
   hl(-rx * 0.38, -ry * 0.38, rx * 0.3, 0.95);
   hl(rx * 0.4, ry * 0.42, rx * 0.13, 0.8);
   // upper lid ink line: a thick arc hugging the top of the ellipse
-  ctx.globalAlpha = 0.9 * open;
+  setAlpha(0.9 * open);
   ctx.strokeStyle = PERSONA_PALETTE.portrait.ink;
   ctx.lineWidth = 2.2 * u;
   ctx.lineCap = 'round';
@@ -89,8 +96,9 @@ function drawEyeAccent(ctx: Ctx2D, eye: EyeMetrics, roll: number, size: Size): v
 }
 
 /** Portrait: glossy eye accents (fade on blink), pink cheek blush and a lip tint. */
-export function drawPortraitOverlay(ctx: Ctx2D, face: FaceTrack, size: Size): void {
+export function drawPortraitOverlay(ctx: Ctx2D, face: FaceTrack, size: Size, strength = 1): void {
   const P = PERSONA_PALETTE.portrait;
+  const setAlpha = alphaSetter(ctx, strength);
   const faceW = face.faceBox.w * size.width;
   // blush
   for (const key of ['LEFT_CHEEK', 'RIGHT_CHEEK'] as const) {
@@ -103,19 +111,19 @@ export function drawPortraitOverlay(ctx: Ctx2D, face: FaceTrack, size: Size): vo
     g.addColorStop(0, withAlpha(P.blush, 0.32));
     g.addColorStop(1, withAlpha(P.blush, 0));
     ctx.save();
-    ctx.globalAlpha = 1;
+    setAlpha(1);
     pathEllipse(ctx, p.x, p.y, rx, ry, face.roll);
     ctx.fillStyle = g;
     ctx.fill();
     ctx.restore();
   }
   // eyes
-  drawEyeAccent(ctx, eyeMetrics(face, 'left', size), face.roll, size);
-  drawEyeAccent(ctx, eyeMetrics(face, 'right', size), face.roll, size);
+  drawEyeAccent(ctx, eyeMetrics(face, 'left', size), face.roll, size, setAlpha);
+  drawEyeAccent(ctx, eyeMetrics(face, 'right', size), face.roll, size, setAlpha);
   // lips: outer ring polygon at 55 % (fallback: ellipse from corner/lip anchors)
   const m = mouthMetrics(face, size);
   ctx.save();
-  ctx.globalAlpha = 0.55;
+  setAlpha(0.55);
   ctx.fillStyle = mixHex(P.lip, P.ink, 0.12);
   if (m.ring.length >= 8) pathPolygon(ctx, m.ring);
   else pathEllipse(ctx, m.center.x, m.center.y, m.width / 2, Math.max(m.height / 2, m.width * 0.18), m.angle);
@@ -127,10 +135,12 @@ export function drawPortraitOverlay(ctx: Ctx2D, face: FaceTrack, size: Size): vo
 
 /**
  * Masked hero: a full-face white mask (face oval, 92 %, soft inner shading) with two opaque
- * teardrop lenses outlined magenta→pink. Per reference errata §4b.3 the eyes are NOT revealed.
+ * teardrop lenses outlined magenta→pink. The eyes are deliberately never revealed; instead the
+ * lenses squint — they squash across their long axis as the lids close (`lensSquash`).
  */
-export function drawMaskedOverlay(ctx: Ctx2D, face: FaceTrack, size: Size): void {
+export function drawMaskedOverlay(ctx: Ctx2D, face: FaceTrack, size: Size, strength = 1): void {
   const M = PERSONA_PALETTE.masked;
+  const setAlpha = alphaSetter(ctx, strength);
   const u = unit(size);
   const oval = scalePolygon(faceOvalPolygon(face.landmarks, size), 1.04);
   if (oval.length < 3) return;
@@ -139,7 +149,7 @@ export function drawMaskedOverlay(ctx: Ctx2D, face: FaceTrack, size: Size): void
 
   // mask body
   ctx.save();
-  ctx.globalAlpha = 0.92;
+  setAlpha(0.92);
   pathPolygon(ctx, oval);
   ctx.fillStyle = M.mask;
   ctx.fill();
@@ -160,20 +170,21 @@ export function drawMaskedOverlay(ctx: Ctx2D, face: FaceTrack, size: Size): void
 
   // rim line for definition against skin/hair
   ctx.save();
-  ctx.globalAlpha = 0.5;
+  setAlpha(0.5);
   pathPolygon(ctx, oval);
   ctx.strokeStyle = M.shade;
   ctx.lineWidth = 1.5 * u;
   ctx.stroke();
   ctx.restore();
 
-  // lenses (opaque)
+  // lenses (opaque), squinting with the lid
   const lw = 4 * u;
   for (const side of ['left', 'right'] as const) {
     const eye = eyeMetrics(face, side, size);
-    const lens = lensShape(eye, side, face.roll, 1.12);
+    const squash = lensSquash(eye.open);
+    const lens = lensShape(eye, side, face.roll, 1.12, squash);
     ctx.save();
-    ctx.globalAlpha = 1;
+    setAlpha(1);
     pathLens(ctx, lens);
     // fill: white with a faint cool shading toward the inner end
     const lg = ctx.createLinearGradient(lens.start.x, lens.start.y, lens.tip.x, lens.tip.y);
@@ -190,10 +201,10 @@ export function drawMaskedOverlay(ctx: Ctx2D, face: FaceTrack, size: Size): void
     ctx.lineJoin = 'round';
     ctx.stroke();
     // thin inner highlight line to sell the lens curvature
-    ctx.globalAlpha = 0.35;
+    setAlpha(0.35);
     ctx.strokeStyle = M.lensOutlineA;
     ctx.lineWidth = 1 * u;
-    pathLens(ctx, lensShape(eye, side, face.roll, 0.96));
+    pathLens(ctx, lensShape(eye, side, face.roll, 0.96, squash));
     ctx.stroke();
     ctx.restore();
   }
@@ -206,8 +217,9 @@ export function drawMaskedOverlay(ctx: Ctx2D, face: FaceTrack, size: Size): void
  * middle with a white chest panel, a radial web (1 px white, 70 %) over the pink areas and
  * the original spider crest on the chest. Flat colours at ≤ 0.9 alpha.
  */
-export function drawSuitOverlay(ctx: Ctx2D, face: FaceTrack, size: Size): void {
+export function drawSuitOverlay(ctx: Ctx2D, face: FaceTrack, size: Size, strength = 1): void {
   const S = PERSONA_PALETTE.suit;
+  const setAlpha = alphaSetter(ctx, strength);
   const u = unit(size);
   const torso = torsoPolygon(face, size);
   const chin = toPx(face.chin, size);
@@ -217,7 +229,7 @@ export function drawSuitOverlay(ctx: Ctx2D, face: FaceTrack, size: Size): void {
   const bottom = size.height;
 
   ctx.save();
-  ctx.globalAlpha = OVERLAY_MAX_ALPHA * 0.98;
+  setAlpha(OVERLAY_MAX_ALPHA * 0.98);
   pathPolygon(ctx, torso);
   ctx.clip();
 
@@ -332,11 +344,14 @@ export function drawSuitOverlay(ctx: Ctx2D, face: FaceTrack, size: Size): void {
   ctx.restore();
 }
 
-/** Dispatch by persona. The overlay canvas must already be cleared by the caller. */
-export function drawOverlay(ctx: Ctx2D, persona: PersonaId, face: FaceTrack, size: Size): void {
+/**
+ * Dispatch by persona. The overlay canvas must already be cleared by the caller.
+ * `strength` = LookSettings.overlayStrength (0..1) — one multiplier on every overlay alpha.
+ */
+export function drawOverlay(ctx: Ctx2D, persona: PersonaId, face: FaceTrack, size: Size, strength = 1): void {
   switch (persona) {
-    case 'portrait': drawPortraitOverlay(ctx, face, size); break;
-    case 'masked': drawMaskedOverlay(ctx, face, size); break;
-    case 'suit': drawSuitOverlay(ctx, face, size); break;
+    case 'portrait': drawPortraitOverlay(ctx, face, size, strength); break;
+    case 'masked': drawMaskedOverlay(ctx, face, size, strength); break;
+    case 'suit': drawSuitOverlay(ctx, face, size, strength); break;
   }
 }

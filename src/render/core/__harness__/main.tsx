@@ -1,13 +1,15 @@
 /**
- * Visual dev harness for the W4 compositor (not wired into the app).
+ * Visual dev harness for the compositor (not wired into the app).
  * `npx vite --port 5176 --open /src/render/core/__harness__/index.html`
  *
  * A generated test "video" (2D canvas: moving gradient, grid and a dark head-like disc) is fed
  * through the renderer with: a live or solid-tinted base, a procedural "poster" window style,
  * an animated quad whose thickness breathes (glitch follows 1 - thickness/0.04), a persona overlay
  * canvas (dot that tracks the disc) and a HUD canvas (fps + crosshair) — all in video space.
+ * The "display" select switches the present fit between Fill (cover) and Fit (contain, black bars);
+ * the info line shows the GPU frame time when the timer-query extension exists.
  */
-import type { QuadCorners, RenderInputs, StylePass, WindowQuad } from '@/types';
+import type { FitMode, QuadCorners, RenderInputs, StylePass, WindowQuad } from '@/types';
 import { DEFAULT_QUALITY, DEFAULT_SCENE, PERSONA_TOKENS } from '@/types';
 import { createRenderer, presetOf, solid } from '../index';
 
@@ -80,7 +82,7 @@ function drawVideo(t: number): { cx: number; cy: number } {
 }
 
 function drawOverlay(headSrc: { cx: number; cy: number }, mirrored: boolean): void {
-  // Overlay is authored in DISPLAY space (already mirrored), like W6 does from mirrored landmarks.
+  // Overlay is authored in DISPLAY space (already mirrored), like the persona layer does from mirrored landmarks.
   const x = mirrored ? VW - headSrc.cx : headSrc.cx;
   octx.clearRect(0, 0, VW, VH);
   octx.fillStyle = PERSONA_TOKENS.lensPink;
@@ -124,6 +126,7 @@ async function main(): Promise<void> {
   const mirrorBox = document.getElementById('mirror') as HTMLInputElement;
   const baseBox = document.getElementById('comic') as HTMLInputElement;
   const glitchBox = document.getElementById('glitch') as HTMLInputElement;
+  const fitSelect = document.getElementById('fit') as HTMLSelectElement;
   const renderer = createRenderer();
   await renderer.init(canvas);
   const resize = (): void => {
@@ -135,6 +138,8 @@ async function main(): Promise<void> {
 
   const comicBase = presetOf([solid([0.9, 0.6, 0.2]), { id: 'tint', frag: 'void main(){ vec3 v = texture(u_video, v_uv).rgb; float l = dot(v, vec3(0.3,0.59,0.11)); fragColor = vec4(mix(texture(u_color, v_uv).rgb * l * 1.4, v, 0.3), 1.0); }' }], 'comic');
   const windowStyle = presetOf([poster], 'paper-portrait', true);
+  // Warm both presets in idle time, exactly like the runtime does after init.
+  renderer.warm([windowStyle, comicBase]);
   // Fake segmentation: disc region = person.
   const seg = { width: 128, height: 128, data: new Float32Array(128 * 128), texture: null };
 
@@ -147,7 +152,7 @@ async function main(): Promise<void> {
     const head = drawVideo(t);
     drawOverlay(head, mirrored);
     const quad = animatedQuad(t, false);
-    // Mask authored in display space (mirrored like W3 does).
+    // Mask authored in display space (mirrored like the tracker does).
     const hx = (mirrored ? VW - head.cx : head.cx) / VW;
     const hy = head.cy / VH;
     for (let y = 0; y < 128; y++) for (let x = 0; x < 128; x++) {
@@ -158,6 +163,7 @@ async function main(): Promise<void> {
     frames++;
     if (now - last > 500) { fps = (frames * 1000) / (now - last); frames = 0; last = now; }
     drawHud(fps, quad, baseBox.checked ? '#ff2b2b' : '#f5f5f7');
+    const fitMode: FitMode = fitSelect.value === 'contain' ? 'contain' : 'cover';
     const inputs: RenderInputs = {
       video, videoWidth: VW, videoHeight: VH, mirrored,
       tracking: { t: now, sourceWidth: VW, sourceHeight: VH, hands: [], face: null, segmentation: seg, timings: { handsMs: 0, faceMs: 0, segMs: 0, totalMs: 0 } },
@@ -165,11 +171,13 @@ async function main(): Promise<void> {
       baseStyle: baseBox.checked ? comicBase : null, windowStyle,
       personaOverlay: overlay, personaBackdrop: backdrop, hudOverlay: hud,
       glitch: glitchBox.checked ? Math.min(1, Math.max(0, 1 - quad.thickness / 0.04)) : 0,
-      quality: { ...DEFAULT_QUALITY }, time: t,
+      quality: { ...DEFAULT_QUALITY }, fitMode, time: t,
     };
     renderer.render(inputs);
     const d = renderer.getDebug();
-    info.textContent = `${canvas.width}×${canvas.height} · internal ${d?.internalWidth}×${d?.internalHeight} · ${renderer.stats.passes} passes · ${renderer.stats.lastFrameMs.toFixed(2)} ms CPU · mask ${d?.maskFormat} · lost×${renderer.contextLossCount}`;
+    const gpu = renderer.stats.gpuMs === null ? (d?.gpuTimer ? 'pending' : 'n/a') : `${renderer.stats.gpuMs.toFixed(2)} ms`;
+    const warm = renderer.warmPending > 0 ? ` · warming ${renderer.warmPending}` : '';
+    info.textContent = `${canvas.width}×${canvas.height} · ${fitMode} · internal ${d?.internalWidth}×${d?.internalHeight} · ${renderer.stats.passes} passes · ${renderer.stats.lastFrameMs.toFixed(2)} ms CPU · GPU ${gpu} · ${d?.programs} programs${warm} · mask ${d?.maskFormat} · lost×${renderer.contextLossCount}`;
     requestAnimationFrame(loop);
   };
   requestAnimationFrame(loop);

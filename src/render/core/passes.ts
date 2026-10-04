@@ -20,7 +20,7 @@ void main() { fragColor = u_solidColor; }`,
   };
 }
 
-/** Wrap a single pass (or several) into a preset without touching W5's STYLE_PRESETS. */
+/** Wrap a single pass (or several) into a preset without touching the shipped STYLE_PRESETS. */
 export function presetOf(passes: StylePass[], id: StylePreset['id'] = 'comic', usesBackdrop = false): StylePreset {
   return { id, passes, usesBackdrop };
 }

@@ -1,10 +1,11 @@
 /**
- * Accessibility (owner: W10): axe-core on onboarding, stage, settings and help;
- * 0 serious/critical violations; keyboard reachability of the main controls.
+ * Accessibility (owner: W10): axe-core on onboarding, stage, settings (all groups), help, the tracker
+ * failure card and the file transport; 0 serious/critical violations; keyboard reachability of the
+ * main controls; focus trap.
  */
 import { test, expect, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
-import { gotoApp, startCamera, SEL } from './helpers/app';
+import { gotoApp, startCamera, makeWebmFixture, stage, SEL, NAMES } from './helpers/app';
 
 async function axe(page: Page, label: string): Promise<void> {
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'best-practice']).analyze();
@@ -26,11 +27,18 @@ test.describe('a11y', () => {
     await axe(page, 'stage');
   });
 
-  test('settings sheet and help dialog', async ({ page }) => {
+  test('settings sheet (all groups) and help dialog', async ({ page }) => {
+    test.slow(); // axe over the full sheet on SwiftShader
     await gotoApp(page);
     await startCamera(page);
     await page.getByRole('button', { name: SEL.settings }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    // Every group is present (axe analyses the whole DOM, so no scrolling is needed — the Diagnostics
+    // rows refresh at 2 Hz, which keeps the sheet "unstable" for scroll actions).
+    for (const group of Object.values(NAMES.groups)) {
+      await expect(dialog.getByRole('heading', { name: group, exact: true }), `Settings group "${group}"`).toBeAttached();
+    }
     await axe(page, 'settings');
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toBeHidden();
@@ -45,6 +53,7 @@ test.describe('a11y', () => {
   });
 
   test('tab order reaches every main control and focus is visible', async ({ page }) => {
+    test.slow(); // SwiftShader: each key round trip waits for the main thread between inferences
     await gotoApp(page);
     await startCamera(page);
     const names = new Set<string>();
@@ -73,7 +82,36 @@ test.describe('a11y', () => {
     }
   });
 
+  test('tracker failure card (models blocked) has no serious/critical violations and is keyboard reachable', async ({ page }) => {
+    test.setTimeout(300_000);
+    await page.route('**/models/*', (route) => route.abort('failed'));
+    await gotoApp(page);
+    await startCamera(page);
+    const card = page.getByRole('alert').filter({ hasText: NAMES.trackerFailure });
+    await expect(card, 'blocked downloads end in the failure card').toBeVisible({ timeout: 120_000 });
+    await expect(card.getByRole('heading', { name: NAMES.trackerFailure })).toBeVisible();
+    await card.getByRole('button', { name: NAMES.retryTracking }).focus();
+    await expect(card.getByRole('button', { name: NAMES.retryTracking })).toBeFocused();
+    await axe(page, 'tracker failure card');
+  });
+
+  test('file transport has no serious/critical violations and its controls are named', async ({ page }) => {
+    test.slow();
+    await gotoApp(page);
+    const clip = await makeWebmFixture(page, 1);
+    test.skip(!clip, 'this browser cannot record a canvas stream to WebM');
+    await page.locator('input[type="file"]').first().setInputFiles(clip!);
+    await expect(stage(page)).toBeVisible({ timeout: 60_000 });
+    const nav = page.getByRole('navigation', { name: NAMES.playback });
+    await expect(nav).toBeVisible({ timeout: 15_000 });
+    await expect(nav.getByRole('slider', { name: NAMES.seek })).toBeVisible();
+    await expect(nav.getByRole('switch', { name: NAMES.loop, exact: true })).toBeVisible();
+    await expect(nav.getByRole('button', { name: /^(Play|Pause)$/ })).toBeVisible();
+    await axe(page, 'transport');
+  });
+
   test('dialog traps focus and restores it on close', async ({ page }) => {
+    test.slow(); // SwiftShader: each key round trip waits for the main thread between inferences
     await gotoApp(page);
     await startCamera(page);
     const settings = page.getByRole('button', { name: SEL.settings });

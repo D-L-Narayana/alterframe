@@ -2,13 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>W4 render-core harness</title>
+    <title>render-core harness</title>
     <style>
       html, body { margin: 0; background: #0b0b0d; color: #f2f2f4; font: 13px system-ui, sans-serif; height: 100%; }
-      #stage { display: block; width: 100vw; height: calc(100vh - 40px); object-fit: cover; }
+      #stage { display: block; width: 100vw; height: calc(100vh - 40px); }
       #bar { height: 40px; display: flex; gap: 16px; align-items: center; padding: 0 12px; background: #141418; }
       #info { margin-left: auto; color: #9a9aa3; }
-      button { background: #222; color: inherit; border: 1px solid rgba(255,255,255,.12); border-radius: 6px; padding: 4px 10px; }
+      button, select { background: #222; color: inherit; border: 1px solid rgba(255,255,255,.12); border-radius: 6px; padding: 4px 10px; }
     </style>
   </head>
   <body>
@@ -16,10 +16,11 @@
       <label><input type="checkbox" id="mirror" checked /> mirrored</label>
       <label><input type="checkbox" id="comic" /> comic base</label>
       <label><input type="checkbox" id="glitch" checked /> thin-strip glitch</label>
+      <label>display <select id="fit" aria-label="Display fit"><option value="cover">Fill</option><option value="contain">Fit</option></select></label>
       <button id="lose" type="button">lose/restore context</button>
       <span id="info"></span>
     </div>
-    <canvas id="stage" aria-label="W4 compositor harness"></canvas>
+    <canvas id="stage" aria-label="compositor harness"></canvas>
     <script type="module" src="./main.tsx"></script>
   </body>
 </html>

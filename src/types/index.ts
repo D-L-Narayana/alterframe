@@ -9,4 +9,4 @@ export * from './media';
 export * from './capture';
 export * from './store';
 export * from './runtime';
-export const CONTRACT_VERSION = '1.1.0';
+export const CONTRACT_VERSION = '1.2.0';

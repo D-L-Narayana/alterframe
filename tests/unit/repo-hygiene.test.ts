@@ -57,6 +57,31 @@ const FORBIDDEN: { label: string; re: RegExp }[] = [
   { label: 'reference folder path', re: /(\.\.\/|^|\s|"|')reference\//m },
 ];
 
+/**
+ * Retired internal planning documents (never part of this repository). Names are assembled at
+ * runtime so this file does not trip its own scan. Historical build notes under docs/handoffs/
+ * are exempt; everywhere else the references must go.
+ */
+const RETIRED_DOCS: string[] = [
+  ['ten-worker', 'contracts'].join('-'),
+  ['implementation', 'plan.md'].join('-'),
+  ['reference', 'analysis'].join('-'),
+  ['lead', 'checklist'].join('-'),
+];
+const RETIRED_DOC_RE = new RegExp(RETIRED_DOCS.map((s) => s.replace(/\./g, '\\.')).join('|'));
+/** Absolute paths into a developer's home directory (private workspace layout); URL path segments like `…/x/home/y` are not matched. */
+const HOME_PATH_RE = new RegExp('(?<![\\w.-])' + ['/ho', 'me/'].join('') + '[A-Za-z0-9_.-]+');
+
+/** Every match of `re` in `text` as `{ line, match }` (1-based lines). */
+function findAll(text: string, re: RegExp): { line: number; match: string }[] {
+  const out: { line: number; match: string }[] = [];
+  const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`);
+  text.split('\n').forEach((l, i) => {
+    for (const m of l.matchAll(g)) out.push({ line: i + 1, match: m[0] });
+  });
+  return out;
+}
+
 const payload = walkPayload();
 
 describe('repo hygiene — payload scope', () => {
@@ -90,6 +115,29 @@ describe('repo hygiene — payload content', () => {
   it('contains no .env files', () => {
     const env = payload.filter((f) => /(^|\/)\.env(\.|$)/.test(f));
     expect(env).toEqual([]);
+  });
+
+  it('contains no *.log files (dev-server / harness logs are scratch output, gitignored)', () => {
+    const logs = payload.filter((f) => /\.log$/i.test(f));
+    expect(logs, 'delete stray log files; *.log is in .gitignore').toEqual([]);
+  });
+
+  it('contains no absolute paths into a home directory in text files', () => {
+    const hits: string[] = [];
+    for (const f of payload) {
+      if (!isText(f)) continue;
+      for (const { line, match } of findAll(readFileSync(join(APP_ROOT, f), 'utf8'), HOME_PATH_RE)) hits.push(`${f}:${line} — absolute home path (${JSON.stringify(match)})`);
+    }
+    expect(hits, `private workspace paths must not be committed:\n${hits.join('\n')}`).toEqual([]);
+  });
+
+  it('references no retired internal planning documents outside docs/handoffs/ (historical notes only)', () => {
+    const hits: string[] = [];
+    for (const f of payload) {
+      if (!isText(f) || f.startsWith('docs/handoffs/')) continue;
+      for (const { line, match } of findAll(readFileSync(join(APP_ROOT, f), 'utf8'), RETIRED_DOC_RE)) hits.push(`${f}:${line} — retired planning document (${JSON.stringify(match)})`);
+    }
+    expect(hits, `remove references to retired planning documents (they are not part of this repository):\n${hits.join('\n')}`).toEqual([]);
   });
 
   it('contains no forbidden strings (reel host, franchise names, creator handle, reference paths)', () => {

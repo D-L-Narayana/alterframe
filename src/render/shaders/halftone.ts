@@ -10,9 +10,12 @@
  *
  * The dot edge is anti-aliased over ~1 px using the cell size, so the pattern does not
  * shimmer when the input moves. Cost: 1 colour + 1 mask fetch.
+ *
+ * Look: `look.halftone` multiplies the darkening cap (0 turns the pass into a no-op, the
+ * colour passes through untouched; 1 = authored 25 %).
  */
 import type { PassContext, StylePass } from '../../types/render';
-import { glsl, LUMA, type Uniforms } from './glsl';
+import { glsl, lookFactor, LUMA, type Uniforms } from './glsl';
 
 const FRAG = glsl`
 uniform float u_cell;         // cell size in output px
@@ -47,7 +50,8 @@ function uniforms(ctx: PassContext): Uniforms {
     // 6 px at 720p, scaling with output height so dots stay the same relative size.
     u_cell: Math.max(3, 6 * (ctx.height / 720)),
     u_angle: (15 * Math.PI) / 180,
-    u_maxDarken: 0.25,
+    // Authored cap × the look multiplier; 1 → 0.25 exactly, 0 → dots off.
+    u_maxDarken: 0.25 * lookFactor(ctx.look, 'halftone'),
     u_personWeight: 0.5,
   };
 }

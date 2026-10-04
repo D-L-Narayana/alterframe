@@ -35,7 +35,7 @@ jobs:
         run: npm ci
       - run: npm run typecheck
       - run: npm run lint
-      - name: Unit tests (incl. repo hygiene)
+      - name: Unit tests (incl. repo hygiene + infra; the GPU suite skips here — it runs in the e2e job with Chromium)
         run: npm test -- --reporter=default --reporter=junit --outputFile=test-results/unit-junit.xml
       - uses: actions/upload-artifact@v4
         if: always()
@@ -45,7 +45,7 @@ jobs:
           if-no-files-found: ignore
 
   build:
-    name: build · verify dist payload
+    name: build · verify dist payload · bundle budget
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -62,8 +62,8 @@ jobs:
       - run: npm ci
       - name: Build (prebuild fetches models + copies wasm; postbuild verifies dist/models + dist/wasm)
         run: npm run build
-      - name: Bundle size report
-        run: node scripts/bundle-report.mjs
+      - name: Bundle size report (total JS ≤ 450 kB gz; entry chunk ≤ 128 kB gz and MediaPipe-free — blocking)
+        run: node scripts/bundle-report.mjs --strict
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -71,9 +71,9 @@ jobs:
           retention-days: 7
 
   e2e:
-    name: playwright (chromium, fake camera, mock tracking)
+    name: playwright (chromium, fake camera, mock tracking) · GPU pixel tests
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     needs: [check]
     steps:
       - uses: actions/checkout@v4
@@ -85,12 +85,19 @@ jobs:
         with:
           path: public/models/*.task public/models/*.tflite
           key: mediapipe-models-${{ hashFiles('scripts/fetch-models.mjs') }}
+      - name: Cache the synthetic fixture clips (generated, ~135 MB, gitignored)
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/*.y4m
+          key: fixture-y4m-${{ hashFiles('tests/fixtures/make-fixture.mjs') }}
       - run: npm ci
       - run: npm run fetch-models
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
-      - name: Generate synthetic fixture video (gitignored, ~125 MB)
-        run: npm run fixture
+      - name: GPU pixel tests (real WebGL2 through SwiftShader; long hook timeout for the harness boot)
+        run: npx vitest run tests/unit/render-core/gpu.test.ts --hookTimeout 300000 --testTimeout 120000
+      - name: Generate synthetic fixture video (no-op when the cache restored it)
+        run: npm run fixture -- --if-missing
       - name: Run e2e
         run: npx playwright test
       - uses: actions/upload-artifact@v4
@@ -101,3 +108,55 @@ jobs:
             playwright-report
             test-results
           retention-days: 7
+
+  prod-gate:
+    name: production gate (serve-dist · vercel.json headers · CSP violations · no dev hooks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Cache the synthetic fixture clips (the gate drives the fake camera)
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/*.y4m
+          key: fixture-y4m-${{ hashFiles('tests/fixtures/make-fixture.mjs') }}
+      - run: npm ci
+      - name: Download the production build (models + wasm included)
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Generate synthetic fixture video (no-op when the cache restored it)
+        run: npm run fixture -- --if-missing
+      - name: Serve dist with the vercel.json semantics and run the gate (E2E_PROD_URL exported by with-server)
+        run: node scripts/with-server.mjs --port 4173 -- npm run test:prod-gate
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prod-gate-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7
+
+  audit:
+    name: npm audit (advisory, non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Audit runtime dependencies (high and above)
+        run: npm audit --omit=dev --audit-level=high

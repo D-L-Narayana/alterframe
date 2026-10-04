@@ -16,13 +16,17 @@ export interface SegmentedProps<T extends string> {
   onChange(v: T): void;
   block?: boolean;
   className?: string;
+  /** Disables every option (e.g. a value managed automatically). */
+  disabled?: boolean;
+  /** id of a hint element describing the group. */
+  describedBy?: string;
 }
 
 /**
  * Radiogroup with roving tabindex: Tab enters once, Arrow keys move selection, Home/End jump.
- * Used for persona (1/2/3) and base (live/comic).
+ * Used for persona (1/2/3), base (live/comic) and the enumerated settings.
  */
-export function Segmented<T extends string>({ label, options, value, onChange, block, className }: SegmentedProps<T>) {
+export function Segmented<T extends string>({ label, options, value, onChange, block, className, disabled, describedBy }: SegmentedProps<T>) {
   const id = useId();
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -40,9 +44,16 @@ export function Segmented<T extends string>({ label, options, value, onChange, b
     refs.current[next]?.focus();
   };
 
-  const cls = ['af-seg', block && 'af-seg--block', className].filter(Boolean).join(' ');
+  const cls = ['af-seg', block && 'af-seg--block', disabled && 'af-seg--disabled', className].filter(Boolean).join(' ');
   return (
-    <div role="radiogroup" aria-label={label} className={cls} id={id}>
+    <div
+      role="radiogroup"
+      aria-label={label}
+      {...(disabled ? { 'aria-disabled': true } : {})}
+      {...(describedBy ? { 'aria-describedby': describedBy } : {})}
+      className={cls}
+      id={id}
+    >
       {options.map((o, i) => {
         const selected = o.value === value;
         return (
@@ -54,6 +65,7 @@ export function Segmented<T extends string>({ label, options, value, onChange, b
             aria-checked={selected}
             {...(o.ariaLabel ? { 'aria-label': o.ariaLabel } : {})}
             tabIndex={selected ? 0 : -1}
+            disabled={disabled}
             className={['af-seg__opt', o.accent && 'af-seg__opt--accent'].filter(Boolean).join(' ')}
             onClick={() => onChange(o.value)}
             onKeyDown={(e) => move(e, i)}

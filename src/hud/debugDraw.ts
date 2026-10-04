@@ -3,10 +3,10 @@ import { HAND_LM } from '@/types';
 import type { Hud2D } from './draw';
 
 /**
- * Minimal dev overlay for tracking landmarks. W7 owns the canonical
- * `drawLandmarks` (src/interaction/debugDraw.ts); this is W8's dependency-free
- * fallback with the same signature so the HUD compiles and is useful on its own.
- * Inject W7's version via `createHud({ debugDraw })` at integration.
+ * Minimal dev overlay for tracking landmarks. The interaction module owns the
+ * canonical `drawLandmarks` (src/interaction/debugDraw.ts); this is the HUD's
+ * dependency-free fallback with the same signature so the HUD compiles and is
+ * useful on its own. The runtime injects the canonical one via `createHud({ debugDraw })`.
  */
 
 /** MediaPipe hand skeleton edges (21 landmarks → 21 bones incl. palm ring). */
